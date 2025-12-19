@@ -1,26 +1,113 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
+@layer theme {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --font-satoshi: 'Satoshi', system-ui, sans-serif;
+    
+    --background: 140 22% 98%;
+    --foreground: 156 27% 12%;
+    --muted: 140 16% 94%;
+    --muted-foreground: 150 9% 36%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 156 27% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 156 27% 12%;
+    --border: 146 15% 88%;
+    --input: 146 15% 88%;
+    --primary: 154 42% 24%;
+    --primary-foreground: 138 31% 94%;
+    --secondary: 146 28% 90%;
+    --secondary-foreground: 154 42% 24%;
+    --accent: 149 35% 35%;
+    --accent-foreground: 140 22% 97%;
+    --destructive: 0 72% 46%;
+    --destructive-foreground: 0 0% 98%;
+    --ring: 154 42% 24%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 155 15% 8%;
+    --foreground: 140 25% 92%;
+    --muted: 155 12% 14%;
+    --muted-foreground: 150 12% 64%;
+    --popover: 155 15% 10%;
+    --popover-foreground: 140 25% 92%;
+    --card: 155 15% 10%;
+    --card-foreground: 140 25% 92%;
+    --border: 155 12% 20%;
+    --input: 155 12% 20%;
+    --primary: 152 40% 55%;
+    --primary-foreground: 155 15% 8%;
+    --secondary: 155 12% 18%;
+    --secondary-foreground: 140 25% 92%;
+    --accent: 152 28% 32%;
+    --accent-foreground: 138 31% 94%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --ring: 152 40% 55%;
   }
 }
 
+@font-face {
+  font-family: "Satoshi";
+  src: url("/Fonts/TTF/Satoshi-Variable.ttf") format("truetype");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Satoshi";
+  src: url("/Fonts/TTF/Satoshi-VariableItalic.ttf") format("truetype");
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-feature-settings: "rlig" 1, "calt" 1;
+  font-family: var(--font-satoshi), system-ui, sans-serif;
+}
+
+/* Input placeholder styling */
+input::placeholder,
+textarea::placeholder {
+  color: hsl(var(--muted-foreground));
+  opacity: 0.5;
+}
+
+/* Card styling - pure white background */
+[data-slot="card"] {
+  background-color: #ffffff;
+  border-color: hsl(var(--border));
+}
+
+/* Input field styling - white background */
+input[type="text"],
+input[type="email"],
+input[type="tel"],
+input[type="date"],
+input[type="password"],
+input[type="number"],
+textarea,
+select {
+  background-color: #ffffff;
+  border-color: hsl(var(--input));
+  color: hsl(var(--foreground));
+}
+
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="tel"]:focus,
+input[type="date"]:focus,
+input[type="password"]:focus,
+input[type="number"]:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  box-shadow: 0 0 0 1px hsl(var(--ring));
+  border-color: hsl(var(--ring));
 }
