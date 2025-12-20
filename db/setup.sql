@@ -56,6 +56,8 @@ ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS phone TEXT;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS branch_id UUID REFERENCES public.branches(id) ON DELETE SET NULL;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS address TEXT;
 ALTER TABLE public.gyms ADD COLUMN IF NOT EXISTS admin_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL;
+-- Ensure members table has father_name column (safe to run multiple times)
+ALTER TABLE public.members ADD COLUMN IF NOT EXISTS father_name TEXT;
 
 -- 3. MEMBERSHIP PLANS
 CREATE TABLE IF NOT EXISTS public.membership_plans (
@@ -77,6 +79,7 @@ CREATE TABLE IF NOT EXISTS public.members (
     gym_id UUID REFERENCES public.gyms(id) ON DELETE CASCADE,
     user_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
     full_name TEXT NOT NULL,
+    father_name TEXT,
     email TEXT,
     phone TEXT,
     date_of_birth DATE,
