@@ -23,10 +23,10 @@ import { toast } from 'sonner'
 
 const navigation = [
     { name: 'Dashboard', href: '/reception/dashboard', icon: LayoutDashboard },
-    { name: 'Member Registration', href: '/reception/registration', icon: UserPlus },
+    { name: 'New Enquiry', href: '/reception/enquiry', icon: UserPlus },
+    { name: 'Members List', href: '/reception/members', icon: Users },
     { name: 'Attendance', href: '/reception/attendance', icon: Calendar },
     { name: 'Payments', href: '/reception/payments', icon: IndianRupee },
-    { name: 'Members List', href: '/reception/members', icon: Users },
     { name: 'Settings', href: '/reception/settings', icon: Settings },
 ]
 

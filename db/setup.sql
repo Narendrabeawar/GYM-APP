@@ -1,6 +1,7 @@
 -- ==========================================
 -- 🎯 GYM MANAGEMENT SYSTEM - FULL SETUP SQL
 -- Idempotent (Safe to run multiple times)
+-- Includes RLS policy fixes for enquiry conversion
 -- ==========================================
 
 -- 0. EXTENSIONS
@@ -119,7 +120,30 @@ CREATE TABLE IF NOT EXISTS public.attendance (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 7. PAYMENTS
+-- 7. ENQUIRIES (New member enquiries before registration)
+CREATE TABLE IF NOT EXISTS public.enquiries (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    gym_id UUID REFERENCES public.gyms(id) ON DELETE CASCADE,
+    branch_id UUID REFERENCES public.branches(id) ON DELETE SET NULL,
+    full_name TEXT NOT NULL,
+    father_name TEXT,
+    phone TEXT NOT NULL,
+    email TEXT,
+    address TEXT NOT NULL,
+    health_info TEXT, -- Medical conditions, allergies, etc.
+    emergency_contact_name TEXT,
+    emergency_contact_phone TEXT,
+    emergency_contact_relationship TEXT,
+    enquiry_date TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    status TEXT CHECK (status IN ('pending', 'converted', 'rejected')) DEFAULT 'pending',
+    notes TEXT,
+    created_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+    converted_to_member_id UUID REFERENCES public.members(id) ON DELETE SET NULL, -- Link to member after conversion
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 8. PAYMENTS
 CREATE TABLE IF NOT EXISTS public.payments (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     gym_id UUID REFERENCES public.gyms(id) ON DELETE CASCADE,
@@ -175,11 +199,11 @@ DO $$ BEGIN
 END $$;
 
 -- MULTI-TENANCY POLICIES (For members, trainers, etc.)
-DO $$ 
+DO $$
 DECLARE
     target_table TEXT;
 BEGIN
-    FOR target_table IN VALUES ('members'), ('trainers'), ('membership_plans'), ('attendance'), ('payments'), ('branches')
+    FOR target_table IN VALUES ('members'), ('trainers'), ('membership_plans'), ('attendance'), ('payments'), ('enquiries'), ('branches')
     LOOP
         -- Admin: Can do everything
         IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = target_table AND policyname = 'Admins have full access') THEN
@@ -197,18 +221,60 @@ BEGIN
 END $$;
 
 -- BRANCH ADMIN & RECEPTIONIST SPECIFIC ACCESS
-DO $$ 
+DO $$
 DECLARE
     target_table TEXT;
 BEGIN
-    FOR target_table IN VALUES ('members'), ('trainers'), ('attendance'), ('payments')
+    FOR target_table IN VALUES ('members'), ('trainers'), ('attendance'), ('payments'), ('enquiries')
     LOOP
-        IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = target_table AND policyname = 'Branch staff access via branch_id') THEN
-             -- Add branch_id column to tables if not exists for better isolation
-             EXECUTE 'ALTER TABLE public.' || target_table || ' ADD COLUMN IF NOT EXISTS branch_id UUID REFERENCES public.branches(id) ON DELETE SET NULL';
-             EXECUTE 'CREATE POLICY "Branch staff access via branch_id" ON public.' || target_table || ' FOR ALL USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND (role IN (''branch_admin'', ''receptionist'')) AND branch_id = public.' || target_table || '.branch_id))';
-        END IF;
+        -- Add branch_id column to tables if not exists for better isolation
+        EXECUTE 'ALTER TABLE public.' || target_table || ' ADD COLUMN IF NOT EXISTS branch_id UUID REFERENCES public.branches(id) ON DELETE SET NULL';
     END LOOP;
+END $$;
+
+-- FIXED GYM-BASED POLICIES (Replaces problematic branch-specific policies)
+-- These allow all gym staff to manage their gym's data regardless of branch
+DO $$ BEGIN
+    -- Drop problematic branch-specific policies
+    DROP POLICY IF EXISTS "Branch staff access via branch_id" ON public.enquiries;
+    DROP POLICY IF EXISTS "Branch staff access via branch_id" ON public.payments;
+    DROP POLICY IF EXISTS "Branch staff access via branch_id" ON public.members;
+
+    -- Create gym-based policies for enquiries
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'enquiries' AND policyname = 'Gym staff can manage enquiries') THEN
+        CREATE POLICY "Gym staff can manage enquiries" ON public.enquiries FOR ALL USING (
+            EXISTS (
+                SELECT 1 FROM public.profiles
+                WHERE id = auth.uid()
+                AND role IN ('admin', 'gym_admin', 'branch_admin', 'receptionist')
+                AND gym_id = public.enquiries.gym_id
+            )
+        );
+    END IF;
+
+    -- Create gym-based policies for payments
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'payments' AND policyname = 'Gym staff can manage payments') THEN
+        CREATE POLICY "Gym staff can manage payments" ON public.payments FOR ALL USING (
+            EXISTS (
+                SELECT 1 FROM public.profiles
+                WHERE id = auth.uid()
+                AND role IN ('admin', 'gym_admin', 'branch_admin', 'receptionist')
+                AND gym_id = public.payments.gym_id
+            )
+        );
+    END IF;
+
+    -- Create gym-based policies for members
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'members' AND policyname = 'Gym staff can manage members') THEN
+        CREATE POLICY "Gym staff can manage members" ON public.members FOR ALL USING (
+            EXISTS (
+                SELECT 1 FROM public.profiles
+                WHERE id = auth.uid()
+                AND role IN ('admin', 'gym_admin', 'branch_admin', 'receptionist')
+                AND gym_id = public.members.gym_id
+            )
+        );
+    END IF;
 END $$;
 
 -- BRANCH SPECIFIC POLICIES
@@ -266,3 +332,58 @@ CREATE TRIGGER on_auth_user_created
 -- ==========================================
 -- Note: These plans won't have a gym_id initially unless you assign one.
 -- Skipping for now to avoid FK errors if no gyms exist.
+
+-- ==========================================
+-- 🔁 MEMBER STATUS SYNC (Idempotent)
+-- Ensures `members.status` reflects membership_end_date and keeps it synced
+-- ==========================================
+
+-- 1) Update existing members whose membership_end_date is in the past
+--    Set status to 'inactive' (you can change to 'expired' if preferred)
+UPDATE public.members
+SET status = 'inactive'
+WHERE membership_end_date IS NOT NULL
+  AND membership_end_date < now()::date
+  AND status IS DISTINCT FROM 'inactive';
+
+-- 2) Trigger function to keep status in sync on INSERT/UPDATE
+CREATE OR REPLACE FUNCTION public.sync_member_status()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- For inserts: set status based on end date (expired -> inactive, else active)
+  IF (TG_OP = 'INSERT') THEN
+    IF NEW.membership_end_date IS NOT NULL AND NEW.membership_end_date < now()::date THEN
+      NEW.status := 'inactive';
+    ELSE
+      NEW.status := COALESCE(NEW.status, 'active');
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  -- For updates: when membership dates or status change, keep them consistent
+  IF (TG_OP = 'UPDATE') THEN
+    -- If end date is in past => inactive
+    IF NEW.membership_end_date IS NOT NULL AND NEW.membership_end_date < now()::date THEN
+      NEW.status := 'inactive';
+    ELSE
+      -- If membership_start_date exists and end date is future or null => active
+      IF NEW.membership_start_date IS NOT NULL AND (NEW.membership_end_date IS NULL OR NEW.membership_end_date >= now()::date) THEN
+        NEW.status := COALESCE(NEW.status, 'active');
+      END IF;
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 3) Trigger to run the function before insert or update on members
+DROP TRIGGER IF EXISTS trg_sync_member_status ON public.members;
+CREATE TRIGGER trg_sync_member_status
+BEFORE INSERT OR UPDATE OF membership_end_date, membership_start_date, status ON public.members
+FOR EACH ROW
+EXECUTE PROCEDURE public.sync_member_status();
+
+-- Note: If you want a daily job to mark rows expired without updates, schedule a cron job
+-- using pg_cron or an external scheduler that runs the UPDATE above once per day.
