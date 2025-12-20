@@ -199,38 +199,38 @@ export async function saveBranchSettings(branchId: string, formData: FormData, u
             // Operating Hours - build JSON object from form data
             operating_hours: {
                 monday: {
-                    open: getString('mondayOpen', '06:00'),
-                    close: getString('mondayClose', '22:00'),
+                    open: getString('mondayOpen'),
+                    close: getString('mondayClose'),
                     closed: getBool('mondayClosed')
                 },
                 tuesday: {
-                    open: getString('tuesdayOpen', '06:00'),
-                    close: getString('tuesdayClose', '22:00'),
+                    open: getString('tuesdayOpen'),
+                    close: getString('tuesdayClose'),
                     closed: getBool('tuesdayClosed')
                 },
                 wednesday: {
-                    open: getString('wednesdayOpen', '06:00'),
-                    close: getString('wednesdayClose', '22:00'),
+                    open: getString('wednesdayOpen'),
+                    close: getString('wednesdayClose'),
                     closed: getBool('wednesdayClosed')
                 },
                 thursday: {
-                    open: getString('thursdayOpen', '06:00'),
-                    close: getString('thursdayClose', '22:00'),
+                    open: getString('thursdayOpen'),
+                    close: getString('thursdayClose'),
                     closed: getBool('thursdayClosed')
                 },
                 friday: {
-                    open: getString('fridayOpen', '06:00'),
-                    close: getString('fridayClose', '22:00'),
+                    open: getString('fridayOpen'),
+                    close: getString('fridayClose'),
                     closed: getBool('fridayClosed')
                 },
                 saturday: {
-                    open: getString('saturdayOpen', '06:00'),
-                    close: getString('saturdayClose', '22:00'),
+                    open: getString('saturdayOpen'),
+                    close: getString('saturdayClose'),
                     closed: getBool('saturdayClosed')
                 },
                 sunday: {
-                    open: getString('sundayOpen', '06:00'),
-                    close: getString('sundayClose', '22:00'),
+                    open: getString('sundayOpen'),
+                    close: getString('sundayClose'),
                     closed: getBool('sundayClosed')
                 }
             },
@@ -256,6 +256,7 @@ export async function saveBranchSettings(branchId: string, formData: FormData, u
         // Build payload for update
         const updatePayload: Record<string, unknown> = {
             name: branchData.branchName,
+            branch_code: branchData.branchCode,
             description: branchData.description,
             established_year: branchData.established_year ? parseInt(branchData.established_year) : null,
             member_capacity: branchData.member_capacity ? parseInt(branchData.member_capacity) : null,

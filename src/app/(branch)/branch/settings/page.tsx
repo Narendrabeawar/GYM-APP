@@ -45,6 +45,33 @@ export default function BranchSettingsPage() {
     const [amenitiesSelected, setAmenitiesSelected] = useState<Record<string, boolean>>({})
     const [operatingHours, setOperatingHours] = useState<Record<string, { open: string; close: string; closed: boolean }>>({})
 
+    // Basic information form state
+    const [basicInfo, setBasicInfo] = useState({
+        branchName: '',
+        branchCode: '',
+        description: '',
+        established: '',
+        capacity: '',
+        address: '',
+        email: '',
+        phone: '',
+        whatsapp: '',
+        website: '',
+        socialMedia: ''
+    })
+
+    const [additionalInfo, setAdditionalInfo] = useState({
+        rules: '',
+        policies: '',
+        emergency: '',
+        manager: '',
+        certifications: '',
+        nearby: '',
+        specialFeatures: '',
+        holidayHours: '',
+        peakHours: ''
+    })
+
     const router = useRouter()
 
     // Compress image to max 2MB
@@ -251,11 +278,31 @@ export default function BranchSettingsPage() {
                 const supabase = createClient()
                 const { data: { user } } = await supabase.auth.getUser()
 
-                if (user?.user_metadata?.branch_id) {
-                    setBranchId(user.user_metadata.branch_id)
+                if (user) {
+                    // First try to get branch_id from user metadata
+                    if (user.user_metadata?.branch_id) {
+                        setBranchId(user.user_metadata.branch_id)
+                        return
+                    }
+
+                    // If not in metadata, try to get from profiles table
+                    const { data: profile } = await supabase
+                        .from('profiles')
+                        .select('branch_id')
+                        .eq('id', user.id)
+                        .single()
+
+                    if (profile?.branch_id) {
+                        setBranchId(profile.branch_id)
+                    } else {
+                        alert('Branch access not found. Please contact your administrator.')
+                        router.push('/auth/login')
+                        return
+                    }
                 } else {
-                    console.error('No branch ID found in user metadata')
-                    setIsLoading(false)
+                    alert('Please log in to access branch settings.')
+                    router.push('/auth/login')
+                    return
                 }
             } catch (error) {
                 console.error('Error getting branch ID:', error)
@@ -264,7 +311,7 @@ export default function BranchSettingsPage() {
         }
 
         getBranchId()
-    }, [])
+    }, [router])
 
     // Load branch data when branchId is available
     useEffect(() => {
@@ -291,6 +338,34 @@ export default function BranchSettingsPage() {
                     if (data.operating_hours) {
                         setOperatingHours(data.operating_hours)
                     }
+
+                    // Load basic information
+                    setBasicInfo({
+                        branchName: data.name || '',
+                        branchCode: data.branch_code || '',
+                        description: data.description || '',
+                        established: data.established_year?.toString() || '',
+                        capacity: data.member_capacity?.toString() || '',
+                        address: data.address || '',
+                        email: data.email || '',
+                        phone: data.phone || '',
+                        whatsapp: data.whatsapp || '',
+                        website: data.website || '',
+                        socialMedia: data.social_media || ''
+                    })
+
+                    // Load additional information
+                    setAdditionalInfo({
+                        rules: data.rules || '',
+                        policies: data.policies || '',
+                        emergency: data.emergency_contact || '',
+                        manager: data.manager_name || '',
+                        certifications: data.certifications || '',
+                        nearby: data.nearby_landmarks || '',
+                        specialFeatures: data.special_features || '',
+                        holidayHours: data.holiday_hours || '',
+                        peakHours: data.peak_hours || ''
+                    })
                 }
             } catch (error) {
                 console.error('Error loading branch data:', error)
@@ -351,6 +426,7 @@ export default function BranchSettingsPage() {
 
         try {
             const formData = new FormData(event.currentTarget)
+
 
             const result = await saveBranchSettings(branchId, formData, uploadedImages)
 
@@ -457,6 +533,8 @@ export default function BranchSettingsPage() {
                                     <Input
                                         id="branchName"
                                         name="branchName"
+                                        value={basicInfo.branchName}
+                                        onChange={(e) => setBasicInfo(prev => ({ ...prev, branchName: e.target.value }))}
                                         placeholder="Main Branch"
                                         className="border-green-200 focus:border-emerald-500"
                                     />
@@ -466,6 +544,8 @@ export default function BranchSettingsPage() {
                                     <Input
                                         id="branchCode"
                                         name="branchCode"
+                                        value={basicInfo.branchCode}
+                                        onChange={(e) => setBasicInfo(prev => ({ ...prev, branchCode: e.target.value }))}
                                         placeholder="BRN001"
                                         className="border-green-200 focus:border-emerald-500"
                                     />
@@ -477,6 +557,8 @@ export default function BranchSettingsPage() {
                                 <Textarea
                                     id="description"
                                     name="description"
+                                    value={basicInfo.description}
+                                    onChange={(e) => setBasicInfo(prev => ({ ...prev, description: e.target.value }))}
                                     placeholder="Describe your gym, its mission, and what makes it special..."
                                     className="border-green-200 focus:border-emerald-500"
                                     rows={4}
@@ -489,6 +571,8 @@ export default function BranchSettingsPage() {
                                     <Input
                                         id="established"
                                         name="established"
+                                        value={basicInfo.established}
+                                        onChange={(e) => setBasicInfo(prev => ({ ...prev, established: e.target.value }))}
                                         placeholder="2020"
                                         className="border-green-200 focus:border-emerald-500"
                                     />
@@ -498,6 +582,8 @@ export default function BranchSettingsPage() {
                                     <Input
                                         id="capacity"
                                         name="capacity"
+                                        value={basicInfo.capacity}
+                                        onChange={(e) => setBasicInfo(prev => ({ ...prev, capacity: e.target.value }))}
                                         placeholder="500"
                                         className="border-green-200 focus:border-emerald-500"
                                     />
@@ -512,6 +598,8 @@ export default function BranchSettingsPage() {
                                 <Textarea
                                     id="address"
                                     name="address"
+                                    value={basicInfo.address}
+                                    onChange={(e) => setBasicInfo(prev => ({ ...prev, address: e.target.value }))}
                                     placeholder="Street address, City, State, PIN Code"
                                     className="border-green-200 focus:border-emerald-500"
                                     rows={3}
@@ -524,10 +612,12 @@ export default function BranchSettingsPage() {
                                         <Mail className="w-4 h-4" />
                                         Email *
                                     </Label>
-                                    <Input 
+                                    <Input
                                         id="email"
                                         name="email"
                                         type="email"
+                                        value={basicInfo.email}
+                                        onChange={(e) => setBasicInfo(prev => ({ ...prev, email: e.target.value }))}
                                         placeholder="branch@example.com"
                                         className="border-green-200 focus:border-emerald-500"
                                     />
@@ -537,22 +627,26 @@ export default function BranchSettingsPage() {
                                         <Phone className="w-4 h-4" />
                                         Phone *
                                     </Label>
-                                    <Input 
+                                    <Input
                                         id="phone"
                                         name="phone"
+                                        value={basicInfo.phone}
+                                        onChange={(e) => setBasicInfo(prev => ({ ...prev, phone: e.target.value }))}
                                         placeholder="+91 98765 43210"
                                         className="border-green-200 focus:border-emerald-500"
                                     />
-                            </div>
-                            <div className="space-y-2">
+                                </div>
+                                <div className="space-y-2">
                                     <Label htmlFor="whatsapp">WhatsApp</Label>
                                     <Input
                                         id="whatsapp"
                                         name="whatsapp"
+                                        value={basicInfo.whatsapp}
+                                        onChange={(e) => setBasicInfo(prev => ({ ...prev, whatsapp: e.target.value }))}
                                         placeholder="+91 98765 43210"
-                                    className="border-green-200 focus:border-emerald-500"
-                                />
-                            </div>
+                                        className="border-green-200 focus:border-emerald-500"
+                                    />
+                                </div>
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -561,6 +655,8 @@ export default function BranchSettingsPage() {
                                     <Input
                                         id="website"
                                         name="website"
+                                        value={basicInfo.website}
+                                        onChange={(e) => setBasicInfo(prev => ({ ...prev, website: e.target.value }))}
                                         placeholder="https://yourgym.com"
                                         className="border-green-200 focus:border-emerald-500"
                                     />
@@ -570,6 +666,8 @@ export default function BranchSettingsPage() {
                                     <Input
                                         id="socialMedia"
                                         name="socialMedia"
+                                        value={basicInfo.socialMedia}
+                                        onChange={(e) => setBasicInfo(prev => ({ ...prev, socialMedia: e.target.value }))}
                                         placeholder="Facebook, Instagram, Twitter URLs"
                                         className="border-green-200 focus:border-emerald-500"
                                     />
@@ -594,7 +692,14 @@ export default function BranchSettingsPage() {
                                                 id={`${day.toLowerCase()}Open`}
                                                 name={`${day.toLowerCase()}Open`}
                                         type="time"
-                                        defaultValue={operatingHours[day.toLowerCase()]?.open || '06:00'}
+                                        value={operatingHours[day.toLowerCase()]?.open || ''}
+                                        onChange={(e) => setOperatingHours(prev => ({
+                                            ...prev,
+                                            [day.toLowerCase()]: {
+                                                ...prev[day.toLowerCase()],
+                                                open: e.target.value
+                                            }
+                                        }))}
                                         className="border-green-200 focus:border-emerald-500"
                                     />
                                 </div>
@@ -604,7 +709,14 @@ export default function BranchSettingsPage() {
                                                 id={`${day.toLowerCase()}Close`}
                                                 name={`${day.toLowerCase()}Close`}
                                         type="time"
-                                        defaultValue={operatingHours[day.toLowerCase()]?.close || '22:00'}
+                                        value={operatingHours[day.toLowerCase()]?.close || ''}
+                                        onChange={(e) => setOperatingHours(prev => ({
+                                            ...prev,
+                                            [day.toLowerCase()]: {
+                                                ...prev[day.toLowerCase()],
+                                                close: e.target.value
+                                            }
+                                        }))}
                                         className="border-green-200 focus:border-emerald-500"
                                     />
                                         </div>
@@ -614,7 +726,14 @@ export default function BranchSettingsPage() {
                                                 id={`${day.toLowerCase()}Closed`}
                                                 name={`${day.toLowerCase()}Closed`}
                                                 value="true"
-                                                defaultChecked={operatingHours[day.toLowerCase()]?.closed || false}
+                                                checked={operatingHours[day.toLowerCase()]?.closed || false}
+                                                onChange={(e) => setOperatingHours(prev => ({
+                                                    ...prev,
+                                                    [day.toLowerCase()]: {
+                                                        ...prev[day.toLowerCase()],
+                                                        closed: e.target.checked
+                                                    }
+                                                }))}
                                                 className="w-4 h-4 text-emerald-600 bg-gray-100 border-gray-300 rounded focus:ring-emerald-500"
                                             />
                                             <Label htmlFor={`${day.toLowerCase()}Closed`} className="text-sm">Closed</Label>
@@ -630,6 +749,9 @@ export default function BranchSettingsPage() {
                                         <Label htmlFor="holidayHours">Holiday Hours</Label>
                                         <Textarea
                                             id="holidayHours"
+                                            name="holidayHours"
+                                            value={additionalInfo.holidayHours}
+                                            onChange={(e) => setAdditionalInfo(prev => ({ ...prev, holidayHours: e.target.value }))}
                                             placeholder="Special hours during holidays..."
                                             className="border-green-200 focus:border-emerald-500"
                                             rows={3}
@@ -639,6 +761,9 @@ export default function BranchSettingsPage() {
                                         <Label htmlFor="peakHours">Peak Hours</Label>
                                         <Textarea
                                             id="peakHours"
+                                            name="peakHours"
+                                            value={additionalInfo.peakHours}
+                                            onChange={(e) => setAdditionalInfo(prev => ({ ...prev, peakHours: e.target.value }))}
                                             placeholder="Busiest times of the day..."
                                             className="border-green-200 focus:border-emerald-500"
                                             rows={3}
@@ -711,6 +836,9 @@ export default function BranchSettingsPage() {
                                 <Label htmlFor="specialFeatures">Special Features</Label>
                                 <Textarea
                                     id="specialFeatures"
+                                    name="specialFeatures"
+                                    value={additionalInfo.specialFeatures}
+                                    onChange={(e) => setAdditionalInfo(prev => ({ ...prev, specialFeatures: e.target.value }))}
                                     placeholder="Any unique features or equipment..."
                                     className="border-green-200 focus:border-emerald-500"
                                     rows={3}
@@ -844,6 +972,8 @@ export default function BranchSettingsPage() {
                                     <Textarea
                                         id="rules"
                                         name="rules"
+                                        value={additionalInfo.rules}
+                                        onChange={(e) => setAdditionalInfo(prev => ({ ...prev, rules: e.target.value }))}
                                         placeholder="Dress code, equipment usage rules, etc."
                                         className="border-green-200 focus:border-emerald-500"
                                         rows={4}
@@ -855,27 +985,33 @@ export default function BranchSettingsPage() {
                                     <Textarea
                                         id="policies"
                                         name="policies"
+                                        value={additionalInfo.policies}
+                                        onChange={(e) => setAdditionalInfo(prev => ({ ...prev, policies: e.target.value }))}
                                         placeholder="Cancellation policy, refund policy, etc."
-                                    className="border-green-200 focus:border-emerald-500"
+                                        className="border-green-200 focus:border-emerald-500"
                                         rows={4}
-                                />
+                                    />
                             </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="space-y-2">
                                         <Label htmlFor="emergency">Emergency Contact</Label>
-                                    <Input 
+                                    <Input
                                             id="emergency"
                                             name="emergency"
+                                            value={additionalInfo.emergency}
+                                            onChange={(e) => setAdditionalInfo(prev => ({ ...prev, emergency: e.target.value }))}
                                             placeholder="Emergency phone number"
                                         className="border-green-200 focus:border-emerald-500"
                                     />
                                 </div>
                                 <div className="space-y-2">
                                         <Label htmlFor="manager">Branch Manager</Label>
-                                    <Input 
+                                    <Input
                                             id="manager"
                                             name="manager"
+                                            value={additionalInfo.manager}
+                                            onChange={(e) => setAdditionalInfo(prev => ({ ...prev, manager: e.target.value }))}
                                             placeholder="Manager's name"
                                         className="border-green-200 focus:border-emerald-500"
                                     />
@@ -887,6 +1023,8 @@ export default function BranchSettingsPage() {
                                     <Textarea
                                         id="certifications"
                                         name="certifications"
+                                        value={additionalInfo.certifications}
+                                        onChange={(e) => setAdditionalInfo(prev => ({ ...prev, certifications: e.target.value }))}
                                         placeholder="ISO certifications, awards, recognitions..."
                                         className="border-green-200 focus:border-emerald-500"
                                         rows={3}
@@ -898,6 +1036,8 @@ export default function BranchSettingsPage() {
                                     <Textarea
                                         id="nearby"
                                         name="nearby"
+                                        value={additionalInfo.nearby}
+                                        onChange={(e) => setAdditionalInfo(prev => ({ ...prev, nearby: e.target.value }))}
                                         placeholder="Metro station, bus stop, mall, etc."
                                         className="border-green-200 focus:border-emerald-500"
                                         rows={3}
@@ -907,7 +1047,7 @@ export default function BranchSettingsPage() {
                         </TabsContent>
                     </Tabs>
 
-                    {/* Hidden inputs for array data - moved outside tabs to ensure they're always included */}
+                    {/* Hidden inputs for ALL form data - moved outside tabs to ensure they're always included regardless of active tab */}
                     <input type="hidden" name="facilities" value={JSON.stringify(facilities)} />
                     <input
                         type="hidden"
@@ -921,6 +1061,30 @@ export default function BranchSettingsPage() {
                                     return amenitiesSelected[key] === true;
                                 }))}
                     />
+
+                    {/* Hidden inputs for basic information fields */}
+                    <input type="hidden" name="branchName" value={basicInfo.branchName} />
+                    <input type="hidden" name="branchCode" value={basicInfo.branchCode} />
+                    <input type="hidden" name="description" value={basicInfo.description} />
+                    <input type="hidden" name="established" value={basicInfo.established} />
+                    <input type="hidden" name="capacity" value={basicInfo.capacity} />
+                    <input type="hidden" name="address" value={basicInfo.address} />
+                    <input type="hidden" name="email" value={basicInfo.email} />
+                    <input type="hidden" name="phone" value={basicInfo.phone} />
+                    <input type="hidden" name="whatsapp" value={basicInfo.whatsapp} />
+                    <input type="hidden" name="website" value={basicInfo.website} />
+                    <input type="hidden" name="socialMedia" value={basicInfo.socialMedia} />
+
+                    {/* Hidden inputs for additional information fields */}
+                    <input type="hidden" name="rules" value={additionalInfo.rules} />
+                    <input type="hidden" name="policies" value={additionalInfo.policies} />
+                    <input type="hidden" name="emergency" value={additionalInfo.emergency} />
+                    <input type="hidden" name="manager" value={additionalInfo.manager} />
+                    <input type="hidden" name="certifications" value={additionalInfo.certifications} />
+                    <input type="hidden" name="nearby" value={additionalInfo.nearby} />
+                    <input type="hidden" name="specialFeatures" value={additionalInfo.specialFeatures} />
+                    <input type="hidden" name="holidayHours" value={additionalInfo.holidayHours} />
+                    <input type="hidden" name="peakHours" value={additionalInfo.peakHours} />
 
                     <div className="flex gap-4 mt-8 p-6 bg-linear-to-r from-gray-50 to-emerald-50 rounded-lg border border-emerald-100">
                         <Button

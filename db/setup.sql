@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS public.branches (
     description TEXT,
     established_year INTEGER,
     member_capacity INTEGER,
+    branch_code TEXT,
     website TEXT,
     social_media TEXT,
     whatsapp TEXT,
@@ -99,6 +100,8 @@ ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS peak_hours TEXT;
 ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS special_features TEXT;
 ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS member_capacity INTEGER;
 ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS established_year INTEGER;
+ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS branch_code TEXT;
 ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS website TEXT;
 ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS social_media TEXT;
 ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS whatsapp TEXT;
