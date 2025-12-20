@@ -1,89 +1,532 @@
 'use client'
 
-import { useState } from 'react'
-import { motion } from 'framer-motion'
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import {
-    Settings,
-    Bell,
-    Shield,
-    User,
     Building2,
-    Lock,
     Mail,
     Phone,
     MapPin,
     Save,
     Clock,
-    Users,
+    Dumbbell,
+    Image as ImageIcon,
+    Info,
+    Upload,
+    X,
+    Edit,
+    Plus,
 } from 'lucide-react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Separator } from '@/components/ui/separator'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
+import { saveBranchSettings, getBranchSettings } from '@/app/actions/branch'
+import { createClient } from '@/lib/supabase/client'
+import { SuccessModal } from '@/components/SuccessModal'
 
 export default function BranchSettingsPage() {
-    const [emailNotifications, setEmailNotifications] = useState(true)
-    const [smsNotifications, setSmsNotifications] = useState(false)
+    const [uploadedImages, setUploadedImages] = useState<string[]>([])
+    const [facilities, setFacilities] = useState<string[]>([])
+    const [newFacility, setNewFacility] = useState('')
+    const [isCompressing, setIsCompressing] = useState(false)
+    const [uploadError, setUploadError] = useState<string>('')
+    const [isLoading, setIsLoading] = useState(true)
+    const [isSaving, setIsSaving] = useState(false)
+    const [branchId, setBranchId] = useState<string>('')
+    const [successModal, setSuccessModal] = useState({
+        isOpen: false,
+        title: '',
+        message: ''
+    })
+    const [amenitiesSelected, setAmenitiesSelected] = useState<Record<string, boolean>>({})
+    const [operatingHours, setOperatingHours] = useState<Record<string, { open: string; close: string; closed: boolean }>>({})
 
+    const router = useRouter()
+
+    // Compress image to max 2MB
+    const compressImage = (file: File, maxSizeMB: number = 2): Promise<string> => {
+        return new Promise((resolve) => {
+            const canvas = document.createElement('canvas')
+            const ctx = canvas.getContext('2d')!
+            const img = new Image()
+
+            img.onload = () => {
+                // Calculate new dimensions while maintaining aspect ratio
+                let { width, height } = img
+
+                // If file size is already under 2MB, return as is
+                if (file.size <= maxSizeMB * 1024 * 1024) {
+                    resolve(URL.createObjectURL(file))
+                    return
+                }
+
+                // Reduce quality and size for compression
+                const maxDimension = 1920 // Max width/height
+                if (width > height) {
+                    if (width > maxDimension) {
+                        height = (height * maxDimension) / width
+                        width = maxDimension
+                    }
+                } else {
+                    if (height > maxDimension) {
+                        width = (width * maxDimension) / height
+                        height = maxDimension
+                    }
+                }
+
+                canvas.width = width
+                canvas.height = height
+
+                ctx.drawImage(img, 0, 0, width, height)
+
+                // Try different quality levels until file size is under 2MB
+                let quality = 0.9
+                let compressedDataUrl = canvas.toDataURL('image/jpeg', quality)
+
+                while (compressedDataUrl.length > maxSizeMB * 1024 * 1024 && quality > 0.1) {
+                    quality -= 0.1
+                    compressedDataUrl = canvas.toDataURL('image/jpeg', quality)
+                }
+
+                resolve(compressedDataUrl)
+            }
+
+            img.src = URL.createObjectURL(file)
+        })
+    }
+
+    const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const files = event.target.files
+        if (!files) return
+
+        const maxImages = 10
+        const maxSizeMB = 2
+        const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
+
+        // Check if adding these files would exceed the limit
+        if (uploadedImages.length + files.length > maxImages) {
+            setUploadError(`Cannot upload more than ${maxImages} images. You can upload ${maxImages - uploadedImages.length} more.`)
+            return
+        }
+
+        setIsCompressing(true)
+        setUploadError('')
+
+        try {
+            const supabase = createClient()
+            const uploadedImageUrls: string[] = []
+
+            for (const file of Array.from(files)) {
+                // Validate file type
+                if (!allowedTypes.includes(file.type)) {
+                    setUploadError(`Invalid file type: ${file.name}. Only JPG, PNG, and WebP are allowed.`)
+                    continue
+                }
+
+                try {
+                    let fileToUpload = file
+
+                    // Check original file size and compress if needed
+                    if (file.size > maxSizeMB * 1024 * 1024) {
+                        // Compress the image
+                        const compressedDataUrl = await compressImage(file, maxSizeMB)
+
+                        // Convert data URL back to File object
+                        const response = await fetch(compressedDataUrl)
+                        const compressedBlob = await response.blob()
+                        fileToUpload = new File([compressedBlob], file.name, {
+                            type: file.type,
+                            lastModified: Date.now()
+                        })
+                    }
+
+                    // Generate unique filename
+                    const fileExt = file.name.split('.').pop()
+                    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
+
+                    // For now, use placeholder branch ID. In real app, get from auth context
+                    const branchId = 'placeholder-branch-id'
+                    const filePath = `branches/${branchId}/${fileName}`
+
+                    // Upload to Supabase Storage
+                    const { error: uploadError } = await supabase.storage
+                        .from('gym-images')
+                        .upload(filePath, fileToUpload, {
+                            cacheControl: '3600',
+                            upsert: false
+                        })
+
+                    if (uploadError) {
+                        console.error('Upload error:', uploadError)
+                        setUploadError(`Failed to upload ${file.name}: ${uploadError.message}`)
+                        continue
+                    }
+
+                    // Get public URL
+                    const { data: urlData } = supabase.storage
+                        .from('gym-images')
+                        .getPublicUrl(filePath)
+
+                    if (urlData?.publicUrl) {
+                        uploadedImageUrls.push(urlData.publicUrl)
+                    }
+                } catch (fileError) {
+                    console.error('Error processing file:', file.name, fileError)
+                    setUploadError(`Error processing ${file.name}. Please try again.`)
+                    continue
+                }
+            }
+
+            if (uploadedImageUrls.length > 0) {
+                setUploadedImages(prev => [...prev, ...uploadedImageUrls])
+            }
+        } catch (error) {
+            setUploadError('Error uploading images. Please try again.')
+            console.error('Image upload error:', error)
+        } finally {
+            setIsCompressing(false)
+        }
+
+        // Reset the input
+        event.target.value = ''
+    }
+
+    const removeImage = async (index: number) => {
+        const imageUrl = uploadedImages[index]
+
+        // If it's a Supabase storage URL, try to delete from storage
+        if (imageUrl && imageUrl.includes('supabase')) {
+            try {
+                const supabase = createClient()
+                // Extract file path from URL
+                const urlParts = imageUrl.split('/storage/v1/object/public/gym-images/')
+                if (urlParts.length > 1) {
+                    const filePath = urlParts[1]
+                    await supabase.storage
+                        .from('gym-images')
+                        .remove([filePath])
+                }
+            } catch (error) {
+                console.error('Error deleting image from storage:', error)
+                // Continue with local removal even if storage deletion fails
+            }
+        }
+
+        // Remove from local state
+        const updatedImages = uploadedImages.filter((_, i) => i !== index)
+        setUploadedImages(updatedImages)
+
+        // Save the updated images array to database
+        if (branchId) {
+            try {
+                const supabase = createClient()
+                const { error } = await supabase
+                    .from('branches')
+                    .update({
+                        images: updatedImages,
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', branchId)
+
+                if (error) {
+                    console.error('Error saving updated images to database:', error)
+                    // Show error to user
+                    alert('Image removed from display but failed to save changes. Please refresh the page.')
+                }
+            } catch (error) {
+                console.error('Error saving updated images to database:', error)
+                alert('Image removed from display but failed to save changes. Please refresh the page.')
+            }
+        }
+    }
+
+    // Get branch ID from authenticated user
+    useEffect(() => {
+        const getBranchId = async () => {
+            try {
+                const supabase = createClient()
+                const { data: { user } } = await supabase.auth.getUser()
+
+                if (user?.user_metadata?.branch_id) {
+                    setBranchId(user.user_metadata.branch_id)
+                } else {
+                    console.error('No branch ID found in user metadata')
+                    setIsLoading(false)
+                }
+            } catch (error) {
+                console.error('Error getting branch ID:', error)
+                setIsLoading(false)
+            }
+        }
+
+        getBranchId()
+    }, [])
+
+    // Load branch data when branchId is available
+    useEffect(() => {
+        if (!branchId) return
+
+        const loadBranchData = async () => {
+            try {
+                const data = await getBranchSettings(branchId)
+
+                if (data) {
+                    // Load existing data into state
+                    if (data.images) setUploadedImages(data.images)
+                    if (data.facilities) setFacilities(data.facilities)
+                    if (data.amenities && Array.isArray(data.amenities)) {
+                        const map: Record<string, boolean> = {}
+                        data.amenities.forEach((a: string) => {
+                            const key = a.toLowerCase().replace(/\s+/g, '')
+                            map[key] = true
+                        })
+                        setAmenitiesSelected(map)
+                    }
+
+                    // Load operating hours
+                    if (data.operating_hours) {
+                        setOperatingHours(data.operating_hours)
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading branch data:', error)
+            } finally {
+                setIsLoading(false)
+            }
+        }
+
+        loadBranchData()
+    }, [branchId])
+
+    const handleSaveImages = async () => {
+        if (!branchId) {
+            alert('Branch ID not found. Please refresh the page and try again.')
+            return
+        }
+
+        setIsSaving(true)
+
+        try {
+            // Create a custom save function just for images or use the existing one
+            const supabase = createClient()
+
+            const { error } = await supabase
+                .from('branches')
+                .update({
+                    images: uploadedImages,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', branchId)
+
+            if (error) {
+                throw new Error(error.message)
+            }
+
+            setSuccessModal({
+                isOpen: true,
+                title: 'Images Saved!',
+                message: 'Your branch images have been saved successfully.'
+            })
+            router.refresh()
+        } catch (error) {
+            console.error('Error saving images:', error)
+            alert('Error saving images: ' + (error as Error).message)
+        } finally {
+            setIsSaving(false)
+        }
+    }
+
+    const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+        if (!branchId) {
+            alert('Branch ID not found. Please refresh the page and try again.')
+            return
+        }
+
+        event.preventDefault()
+        setIsSaving(true)
+
+        try {
+            const formData = new FormData(event.currentTarget)
+
+            const result = await saveBranchSettings(branchId, formData, uploadedImages)
+
+            if (result.success) {
+                setSuccessModal({
+                    isOpen: true,
+                    title: 'Branch Information Saved!',
+                    message: 'Your branch information has been updated successfully.'
+                })
+            } else {
+                alert('Error: ' + result.error)
+            }
+        } catch (error) {
+            console.error('Error saving branch settings:', error)
+            alert('An unexpected error occurred')
+        } finally {
+            setIsSaving(false)
+        }
+    }
+
+    const addFacility = () => {
+        if (newFacility.trim() && !facilities.includes(newFacility.trim())) {
+            setFacilities(prev => [...prev, newFacility.trim()])
+            setNewFacility('')
+        }
+    }
+
+    const removeFacility = (facility: string) => {
+        setFacilities(prev => prev.filter(f => f !== facility))
+    }
+
+    if (isLoading) {
     return (
         <div className="space-y-8">
+                <div>
+                    <h1 className="text-3xl font-bold text-gradient-emerald">
+                        Branch Information Management
+                    </h1>
+                    <p className="text-muted-foreground mt-2">Loading branch information...</p>
+                </div>
+                <div className="flex justify-center items-center h-64">
+                    <div className="animate-spin w-8 h-8 border-4 border-emerald-600 border-t-transparent rounded-full"></div>
+                </div>
+            </div>
+        )
+    }
+
+    return (
+        <>
+        <form onSubmit={handleSubmit} className="space-y-8">
             {/* Header */}
             <div>
                 <h1 className="text-3xl font-bold text-gradient-emerald">
-                    Branch Settings
+                    Branch Information Management
                 </h1>
-                <p className="text-muted-foreground mt-2">Manage your branch configuration and preferences</p>
+                <p className="text-muted-foreground mt-2">Complete information about your gym branch for landing page display</p>
             </div>
 
-            <div className="grid gap-6">
-                {/* Branch Information */}
-                <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.1 }}
-                >
-                    <Card className="glass border-green-100">
-                        <CardHeader>
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
-                                    <Building2 className="w-5 h-5 text-emerald-700" />
-                                </div>
-                                <div>
-                                    <CardTitle>Branch Information</CardTitle>
-                                    <CardDescription>Update your branch details</CardDescription>
-                                </div>
-                            </div>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-8">
+                    <Tabs defaultValue="basic" className="w-full">
+                        <TabsList className="grid w-full grid-cols-5 h-auto p-1 bg-linear-to-r from-emerald-50 to-green-50 rounded-xl border border-emerald-200 shadow-sm">
+                            <TabsTrigger
+                                value="basic"
+                                className="flex flex-col items-center gap-1 p-2 rounded-lg text-emerald-700 data-[state=active]:bg-emerald-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-200 hover:bg-emerald-100 hover:scale-105"
+                            >
+                                <Building2 className="w-4 h-4" />
+                                <span className="text-xs font-medium">Basic Info</span>
+                            </TabsTrigger>
+                            <TabsTrigger
+                                value="hours"
+                                className="flex flex-col items-center gap-1 p-2 rounded-lg text-emerald-700 data-[state=active]:bg-emerald-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-200 hover:bg-emerald-100 hover:scale-105"
+                            >
+                                <Clock className="w-4 h-4" />
+                                <span className="text-xs font-medium">Operating Hours</span>
+                            </TabsTrigger>
+                            <TabsTrigger
+                                value="facilities"
+                                className="flex flex-col items-center gap-1 p-2 rounded-lg text-emerald-700 data-[state=active]:bg-emerald-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-200 hover:bg-emerald-100 hover:scale-105"
+                            >
+                                <Dumbbell className="w-4 h-4" />
+                                <span className="text-xs font-medium">Facilities</span>
+                            </TabsTrigger>
+                            <TabsTrigger
+                                value="gallery"
+                                className="flex flex-col items-center gap-1 p-2 rounded-lg text-emerald-700 data-[state=active]:bg-emerald-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-200 hover:bg-emerald-100 hover:scale-105"
+                            >
+                                <ImageIcon className="w-4 h-4" />
+                                <span className="text-xs font-medium">Gallery</span>
+                            </TabsTrigger>
+                            <TabsTrigger
+                                value="additional"
+                                className="flex flex-col items-center gap-1 p-2 rounded-lg text-emerald-700 data-[state=active]:bg-emerald-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-200 hover:bg-emerald-100 hover:scale-105"
+                            >
+                                <Info className="w-4 h-4" />
+                                <span className="text-xs font-medium">Additional</span>
+                            </TabsTrigger>
+                        </TabsList>
+
+                        {/* Basic Information Tab */}
+                        <TabsContent value="basic" className="space-y-6">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="space-y-2">
-                                    <Label htmlFor="branchName">Branch Name</Label>
-                                    <Input 
-                                        id="branchName" 
+                                    <Label htmlFor="branchName">Branch Name *</Label>
+                                    <Input
+                                        id="branchName"
+                                        name="branchName"
                                         placeholder="Main Branch"
                                         className="border-green-200 focus:border-emerald-500"
                                     />
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="branchCode">Branch Code</Label>
-                                    <Input 
-                                        id="branchCode" 
+                                    <Input
+                                        id="branchCode"
+                                        name="branchCode"
                                         placeholder="BRN001"
                                         className="border-green-200 focus:border-emerald-500"
                                     />
                                 </div>
                             </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                            <div className="space-y-2">
+                                <Label htmlFor="description">Gym Description</Label>
+                                <Textarea
+                                    id="description"
+                                    name="description"
+                                    placeholder="Describe your gym, its mission, and what makes it special..."
+                                    className="border-green-200 focus:border-emerald-500"
+                                    rows={4}
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="space-y-2">
+                                    <Label htmlFor="established">Established Year</Label>
+                                    <Input
+                                        id="established"
+                                        name="established"
+                                        placeholder="2020"
+                                        className="border-green-200 focus:border-emerald-500"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="capacity">Member Capacity</Label>
+                                    <Input
+                                        id="capacity"
+                                        name="capacity"
+                                        placeholder="500"
+                                        className="border-green-200 focus:border-emerald-500"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label htmlFor="address" className="flex items-center gap-2">
+                                    <MapPin className="w-4 h-4" />
+                                    Full Address *
+                                </Label>
+                                <Textarea
+                                    id="address"
+                                    name="address"
+                                    placeholder="Street address, City, State, PIN Code"
+                                    className="border-green-200 focus:border-emerald-500"
+                                    rows={3}
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                                 <div className="space-y-2">
                                     <Label htmlFor="email" className="flex items-center gap-2">
                                         <Mail className="w-4 h-4" />
-                                        Email
+                                        Email *
                                     </Label>
                                     <Input 
-                                        id="email" 
+                                        id="email"
+                                        name="email"
                                         type="email"
                                         placeholder="branch@example.com"
                                         className="border-green-200 focus:border-emerald-500"
@@ -92,196 +535,421 @@ export default function BranchSettingsPage() {
                                 <div className="space-y-2">
                                     <Label htmlFor="phone" className="flex items-center gap-2">
                                         <Phone className="w-4 h-4" />
-                                        Phone
+                                        Phone *
                                     </Label>
                                     <Input 
-                                        id="phone" 
+                                        id="phone"
+                                        name="phone"
                                         placeholder="+91 98765 43210"
+                                        className="border-green-200 focus:border-emerald-500"
+                                    />
+                            </div>
+                            <div className="space-y-2">
+                                    <Label htmlFor="whatsapp">WhatsApp</Label>
+                                    <Input
+                                        id="whatsapp"
+                                        name="whatsapp"
+                                        placeholder="+91 98765 43210"
+                                    className="border-green-200 focus:border-emerald-500"
+                                />
+                            </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="space-y-2">
+                                    <Label htmlFor="website">Website</Label>
+                                    <Input
+                                        id="website"
+                                        name="website"
+                                        placeholder="https://yourgym.com"
+                                        className="border-green-200 focus:border-emerald-500"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="socialMedia">Social Media Links</Label>
+                                    <Input
+                                        id="socialMedia"
+                                        name="socialMedia"
+                                        placeholder="Facebook, Instagram, Twitter URLs"
                                         className="border-green-200 focus:border-emerald-500"
                                     />
                                 </div>
                             </div>
+                        </TabsContent>
+
+                        {/* Operating Hours Tab */}
+                        <TabsContent value="hours" className="space-y-6">
+                            <div className="space-y-4">
+                                <h3 className="text-lg font-semibold flex items-center gap-2">
+                                    <Clock className="w-5 h-5" />
+                                    Weekly Schedule
+                                </h3>
+
+                                {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((day) => (
+                                    <div key={day} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
+                                        <Label className="font-medium">{day}</Label>
+                                        <div className="space-y-1">
+                                            <Label htmlFor={`${day.toLowerCase()}Open`} className="text-sm">Opening</Label>
+                                    <Input
+                                                id={`${day.toLowerCase()}Open`}
+                                                name={`${day.toLowerCase()}Open`}
+                                        type="time"
+                                        defaultValue={operatingHours[day.toLowerCase()]?.open || '06:00'}
+                                        className="border-green-200 focus:border-emerald-500"
+                                    />
+                                </div>
+                                        <div className="space-y-1">
+                                            <Label htmlFor={`${day.toLowerCase()}Close`} className="text-sm">Closing</Label>
+                                    <Input
+                                                id={`${day.toLowerCase()}Close`}
+                                                name={`${day.toLowerCase()}Close`}
+                                        type="time"
+                                        defaultValue={operatingHours[day.toLowerCase()]?.close || '22:00'}
+                                        className="border-green-200 focus:border-emerald-500"
+                                    />
+                                        </div>
+                                        <div className="flex items-center space-x-2">
+                                            <input
+                                                type="checkbox"
+                                                id={`${day.toLowerCase()}Closed`}
+                                                name={`${day.toLowerCase()}Closed`}
+                                                value="true"
+                                                defaultChecked={operatingHours[day.toLowerCase()]?.closed || false}
+                                                className="w-4 h-4 text-emerald-600 bg-gray-100 border-gray-300 rounded focus:ring-emerald-500"
+                                            />
+                                            <Label htmlFor={`${day.toLowerCase()}Closed`} className="text-sm">Closed</Label>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="space-y-4">
+                                <h3 className="text-lg font-semibold">Special Hours</h3>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="holidayHours">Holiday Hours</Label>
+                                        <Textarea
+                                            id="holidayHours"
+                                            placeholder="Special hours during holidays..."
+                                            className="border-green-200 focus:border-emerald-500"
+                                            rows={3}
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="peakHours">Peak Hours</Label>
+                                        <Textarea
+                                            id="peakHours"
+                                            placeholder="Busiest times of the day..."
+                                            className="border-green-200 focus:border-emerald-500"
+                                            rows={3}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        </TabsContent>
+
+                        {/* Facilities & Amenities Tab */}
+                        <TabsContent value="facilities" className="space-y-6">
+                            <div className="space-y-4">
+                                <h3 className="text-lg font-semibold flex items-center gap-2">
+                                    <Dumbbell className="w-5 h-5" />
+                                    Facilities & Equipment
+                                </h3>
+
+                                <div className="flex gap-2">
+                                    <Input
+                                        value={newFacility}
+                                        onChange={(e) => setNewFacility(e.target.value)}
+                                        placeholder="Add facility (e.g., Cardio Zone, Free Weights)"
+                                        className="border-green-200 focus:border-emerald-500"
+                                        onKeyPress={(e) => e.key === 'Enter' && addFacility()}
+                                    />
+                                    <Button onClick={addFacility} className="bg-emerald-700 hover:bg-emerald-800">
+                                        <Plus className="w-4 h-4" />
+                            </Button>
+                                </div>
+
+                                <div className="flex flex-wrap gap-2">
+                                    {facilities.map((facility, index) => (
+                                        <Badge key={index} variant="secondary" className="flex items-center gap-1">
+                                            {facility}
+                                            <X
+                                                className="w-3 h-3 cursor-pointer hover:text-red-500"
+                                                onClick={() => removeFacility(facility)}
+                                            />
+                                        </Badge>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="space-y-4">
+                                <h3 className="text-lg font-semibold">Amenities</h3>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {[
+                                        'Locker Room', 'Shower Facilities', 'Parking', 'WiFi',
+                                        'Personal Training', 'Group Classes', 'Nutrition Counseling',
+                                        'Sauna', 'Swimming Pool', 'Cafeteria', 'Child Care', 'Massage'
+                                    ].map((amenity) => {
+                                        const key = amenity.toLowerCase().replace(/\s+/g, '')
+                                        return (
+                                            <div key={amenity} className="flex items-center space-x-2">
+                                                <Switch
+                                                    id={key}
+                                                    checked={!!amenitiesSelected[key]}
+                                                    onCheckedChange={(val) =>
+                                                        setAmenitiesSelected(prev => ({ ...prev, [key]: val }))
+                                                    }
+                                                />
+                                                <Label htmlFor={key}>{amenity}</Label>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+
                             <div className="space-y-2">
-                                <Label htmlFor="address" className="flex items-center gap-2">
-                                    <MapPin className="w-4 h-4" />
-                                    Address
-                                </Label>
-                                <Textarea 
-                                    id="address" 
-                                    placeholder="Enter branch address"
+                                <Label htmlFor="specialFeatures">Special Features</Label>
+                                <Textarea
+                                    id="specialFeatures"
+                                    placeholder="Any unique features or equipment..."
                                     className="border-green-200 focus:border-emerald-500"
                                     rows={3}
                                 />
                             </div>
-                            <Button className="bg-emerald-700 hover:bg-emerald-800 text-white">
-                                <Save className="w-4 h-4 mr-2" />
-                                Save Changes
-                            </Button>
-                        </CardContent>
-                    </Card>
-                </motion.div>
+                        </TabsContent>
 
-                {/* Operating Hours */}
-                <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.2 }}
-                >
-                    <Card className="glass border-green-100">
-                        <CardHeader>
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                                    <Clock className="w-5 h-5 text-blue-700" />
-                                </div>
-                                <div>
-                                    <CardTitle>Operating Hours</CardTitle>
-                                    <CardDescription>Set your branch working hours</CardDescription>
-                                </div>
-                            </div>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label htmlFor="openTime">Opening Time</Label>
-                                    <Input 
-                                        id="openTime" 
-                                        type="time"
-                                        defaultValue="06:00"
-                                        className="border-green-200 focus:border-emerald-500"
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="closeTime">Closing Time</Label>
-                                    <Input 
-                                        id="closeTime" 
-                                        type="time"
-                                        defaultValue="22:00"
-                                        className="border-green-200 focus:border-emerald-500"
-                                    />
-                                </div>
-                            </div>
-                            <Button className="bg-emerald-700 hover:bg-emerald-800 text-white">
-                                <Save className="w-4 h-4 mr-2" />
-                                Update Hours
-                            </Button>
-                        </CardContent>
-                    </Card>
-                </motion.div>
+                        {/* Gallery & Images Tab */}
+                        <TabsContent value="gallery" className="space-y-6">
+                            <div className="space-y-4">
+                                <h3 className="text-lg font-semibold flex items-center gap-2">
+                                    <ImageIcon className="w-5 h-5" />
+                                    Gym Gallery
+                                </h3>
 
-                {/* Notifications */}
-                <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.3 }}
-                >
-                    <Card className="glass border-green-100">
-                        <CardHeader>
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center">
-                                    <Bell className="w-5 h-5 text-amber-700" />
-                                </div>
-                                <div>
-                                    <CardTitle>Notification Preferences</CardTitle>
-                                    <CardDescription>Manage how you receive updates</CardDescription>
-                                </div>
-                            </div>
-                        </CardHeader>
-                        <CardContent className="space-y-6">
+                                <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 mb-4">
                             <div className="flex items-center justify-between">
-                                <div className="space-y-0.5">
-                                    <Label className="text-base font-semibold">Email Notifications</Label>
-                                    <p className="text-sm text-muted-foreground">
-                                        Receive notifications about payments and memberships
+                                        <div>
+                                            <p className="text-sm font-medium text-emerald-800">Upload Guidelines</p>
+                                            <p className="text-xs text-emerald-600">
+                                                Maximum 10 images • Max 2MB per image • PNG, JPG, JPEG supported
                                     </p>
                                 </div>
-                                <Switch 
-                                    checked={emailNotifications}
-                                    onCheckedChange={setEmailNotifications}
+                                        <div className="text-right">
+                                            <p className="text-sm font-medium text-emerald-800">
+                                                {uploadedImages.length}/10 images
+                                            </p>
+                                            <div className="w-20 bg-emerald-200 rounded-full h-2 mt-1">
+                                                <div
+                                                    className="bg-emerald-600 h-2 rounded-full transition-all duration-300"
+                                                    style={{ width: `${(uploadedImages.length / 10) * 100}%` }}
+                                                ></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {uploadError && (
+                                    <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+                                        <p className="text-red-800 text-sm">{uploadError}</p>
+                                    </div>
+                                )}
+
+                                {isCompressing && (
+                                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4 text-center">
+                                        <div className="animate-spin w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full mx-auto mb-2"></div>
+                                        <p className="text-blue-800 text-sm">Compressing images...</p>
+                            </div>
+                                )}
+
+                                {uploadedImages.length < 10 && !isCompressing && (
+                                    <div
+                                        className="border-2 border-dashed border-green-200 rounded-lg p-6 text-center cursor-pointer hover:border-green-400 hover:bg-green-50 transition-all duration-200"
+                                        onClick={() => document.getElementById('imageUpload')?.click()}
+                                    >
+                                        <Upload className="w-12 h-12 text-green-500 mx-auto mb-4" />
+                                        <div>
+                                            <span className="text-lg font-medium text-green-700">Click to upload images</span>
+                                            <p className="text-sm text-muted-foreground mt-1">
+                                                PNG, JPG, JPEG up to 2MB each ({10 - uploadedImages.length} remaining)
+                                    </p>
+                                </div>
+                                        <Input
+                                            id="imageUpload"
+                                            type="file"
+                                            multiple
+                                            accept="image/*"
+                                            onChange={handleImageUpload}
+                                            className="hidden"
+                                            disabled={uploadedImages.length >= 10}
                                 />
                             </div>
-                            <Separator />
-                            <div className="flex items-center justify-between">
-                                <div className="space-y-0.5">
-                                    <Label className="text-base font-semibold">SMS Notifications</Label>
-                                    <p className="text-sm text-muted-foreground">
-                                        Get SMS alerts for important events
-                                    </p>
-                                </div>
-                                <Switch 
-                                    checked={smsNotifications}
-                                    onCheckedChange={setSmsNotifications}
-                                />
-                            </div>
-                            <Separator />
-                            <div className="flex items-center justify-between">
-                                <div className="space-y-0.5">
-                                    <Label className="text-base font-semibold">Expiry Reminders</Label>
-                                    <p className="text-sm text-muted-foreground">
-                                        Alert when memberships are about to expire
-                                    </p>
-                                </div>
-                                <Switch defaultChecked />
-                            </div>
-                        </CardContent>
-                    </Card>
-                </motion.div>
+                                )}
 
-                {/* Security */}
-                <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.4 }}
-                >
-                    <Card className="glass border-green-100">
-                        <CardHeader>
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
-                                    <Shield className="w-5 h-5 text-red-700" />
+                                {uploadedImages.length >= 10 && (
+                                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-center">
+                                        <p className="text-amber-800 font-medium">Maximum 10 images reached</p>
+                                        <p className="text-sm text-amber-600">Remove some images to upload more</p>
                                 </div>
-                                <div>
-                                    <CardTitle>Security Settings</CardTitle>
-                                    <CardDescription>Manage access and security options</CardDescription>
+                                )}
+
+                                {uploadedImages.length > 0 && (
+                                    <div className="space-y-4">
+                                        <div className="flex justify-between items-center">
+                                            <h4 className="text-sm font-medium text-gray-700">Uploaded Images ({uploadedImages.length}/10)</h4>
+                                            <Button
+                                                type="button"
+                                                onClick={handleSaveImages}
+                                                disabled={isSaving || !branchId}
+                                                className="bg-green-600 hover:bg-green-700 text-white text-sm"
+                                                size="sm"
+                                            >
+                                                <Save className="w-4 h-4 mr-1" />
+                                                Save Images
+                                            </Button>
+                                        </div>
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                            {uploadedImages.map((image, index) => (
+                                                <div key={index} className="relative group">
+                                                    <div
+                                                        className="w-full h-24 bg-cover bg-center rounded-lg border"
+                                                        style={{ backgroundImage: `url(${image})` }}
+                                                    />
+                                                    <Button
+                                                        size="sm"
+                                                        variant="destructive"
+                                                        className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                        onClick={() => removeImage(index)}
+                                                    >
+                                                        <X className="w-3 h-3" />
+                                                    </Button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                                 </div>
-                            </div>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
+                        </TabsContent>
+
+                        {/* Additional Information Tab */}
+                        <TabsContent value="additional" className="space-y-6">
+
+                            <div className="space-y-4">
+                                <h3 className="text-lg font-semibold flex items-center gap-2">
+                                    <Info className="w-5 h-5" />
+                                    Additional Information
+                                </h3>
+
                             <div className="space-y-2">
-                                <Label htmlFor="currentPassword">Current Password</Label>
-                                <Input 
-                                    id="currentPassword" 
-                                    type="password"
-                                    placeholder="Enter current password"
+                                    <Label htmlFor="rules">Gym Rules & Regulations</Label>
+                                    <Textarea
+                                        id="rules"
+                                        name="rules"
+                                        placeholder="Dress code, equipment usage rules, etc."
+                                        className="border-green-200 focus:border-emerald-500"
+                                        rows={4}
+                                    />
+                            </div>
+
+                            <div className="space-y-2">
+                                    <Label htmlFor="policies">Membership Policies</Label>
+                                    <Textarea
+                                        id="policies"
+                                        name="policies"
+                                        placeholder="Cancellation policy, refund policy, etc."
                                     className="border-green-200 focus:border-emerald-500"
+                                        rows={4}
                                 />
                             </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="space-y-2">
-                                    <Label htmlFor="newPassword">New Password</Label>
+                                        <Label htmlFor="emergency">Emergency Contact</Label>
                                     <Input 
-                                        id="newPassword" 
-                                        type="password"
-                                        placeholder="Enter new password"
+                                            id="emergency"
+                                            name="emergency"
+                                            placeholder="Emergency phone number"
                                         className="border-green-200 focus:border-emerald-500"
                                     />
                                 </div>
                                 <div className="space-y-2">
-                                    <Label htmlFor="confirmPassword">Confirm Password</Label>
+                                        <Label htmlFor="manager">Branch Manager</Label>
                                     <Input 
-                                        id="confirmPassword" 
-                                        type="password"
-                                        placeholder="Confirm new password"
+                                            id="manager"
+                                            name="manager"
+                                            placeholder="Manager's name"
                                         className="border-green-200 focus:border-emerald-500"
                                     />
                                 </div>
                             </div>
-                            <Button className="bg-red-600 hover:bg-red-700 text-white">
-                                <Lock className="w-4 h-4 mr-2" />
-                                Update Password
-                            </Button>
-                        </CardContent>
-                    </Card>
-                </motion.div>
+
+                                <div className="space-y-2">
+                                    <Label htmlFor="certifications">Certifications & Awards</Label>
+                                    <Textarea
+                                        id="certifications"
+                                        name="certifications"
+                                        placeholder="ISO certifications, awards, recognitions..."
+                                        className="border-green-200 focus:border-emerald-500"
+                                        rows={3}
+                                    />
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label htmlFor="nearby">Nearby Landmarks</Label>
+                                    <Textarea
+                                        id="nearby"
+                                        name="nearby"
+                                        placeholder="Metro station, bus stop, mall, etc."
+                                        className="border-green-200 focus:border-emerald-500"
+                                        rows={3}
+                                    />
+                                </div>
+                            </div>
+                        </TabsContent>
+                    </Tabs>
+
+                    {/* Hidden inputs for array data - moved outside tabs to ensure they're always included */}
+                    <input type="hidden" name="facilities" value={JSON.stringify(facilities)} />
+                    <input
+                        type="hidden"
+                        name="amenities"
+                                value={JSON.stringify([
+                                    'Locker Room', 'Shower Facilities', 'Parking', 'WiFi',
+                                    'Personal Training', 'Group Classes', 'Nutrition Counseling',
+                                    'Sauna', 'Swimming Pool', 'Cafeteria', 'Child Care', 'Massage'
+                                ].filter(a => {
+                                    const key = a.toLowerCase().replace(/\s+/g, '');
+                                    return amenitiesSelected[key] === true;
+                                }))}
+                    />
+
+                    <div className="flex gap-4 mt-8 p-6 bg-linear-to-r from-gray-50 to-emerald-50 rounded-lg border border-emerald-100">
+                        <Button
+                            type="submit"
+                            disabled={isSaving || !branchId}
+                            className="bg-linear-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 disabled:opacity-50"
+                        >
+                            <Save className="w-4 h-4 mr-2" />
+                            {isSaving ? 'Saving...' : 'Save All Information'}
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            className="border-emerald-300 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-400 shadow-md hover:shadow-lg transition-all duration-200"
+                            onClick={() => router.push('/branch/viewalldetail')}
+                        >
+                            <Edit className="w-4 h-4 mr-2" />
+                            View All Details
+                        </Button>
             </div>
         </div>
+        </form>
+
+        <SuccessModal
+            isOpen={successModal.isOpen}
+            onClose={() => setSuccessModal({ isOpen: false, title: '', message: '' })}
+            title={successModal.title}
+            message={successModal.message}
+        />
+        </>
     )
 }

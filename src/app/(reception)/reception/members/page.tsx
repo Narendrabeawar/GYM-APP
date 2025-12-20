@@ -45,6 +45,7 @@ import { Label } from '@/components/ui/label'
 
 type Member = {
     id: string
+    user_id?: string
     full_name: string
     email: string
     phone: string
@@ -66,14 +67,33 @@ export default function MembersDirectoryPage() {
     const [activeTab, setActiveTab] = useState<'active' | 'expired' | 'expiring-soon'>('active')
     const [membershipPlans, setMembershipPlans] = useState<{id: string, name: string, duration_months: number, price?: number}[]>([])
     const [showRenewalModal, setShowRenewalModal] = useState(false)
+    const [showViewModal, setShowViewModal] = useState(false)
+    const [showEditModal, setShowEditModal] = useState(false)
     const [selectedMember, setSelectedMember] = useState<Member | null>(null)
     const [selectedPlan, setSelectedPlan] = useState('')
     const [amountReceived, setAmountReceived] = useState('')
     const [isRenewing, setIsRenewing] = useState(false)
     const [isExtension, setIsExtension] = useState(false)
+    const [isActiveMemberExtension, setIsActiveMemberExtension] = useState(false)
+    // Edit form states
+    const [editForm, setEditForm] = useState({
+        full_name: '',
+        phone: '',
+        email: '',
+        gender: '',
+        address: ''
+    })
     const [selectedMembers, setSelectedMembers] = useState<Member[]>([])
     const [selectAll, setSelectAll] = useState(false)
     const supabase = createClient()
+    const formatDate = (input?: string | Date | null) => {
+        if (!input) return 'N/A'
+        const date = new Date(input)
+        const dd = String(date.getDate()).padStart(2, '0')
+        const mm = String(date.getMonth() + 1).padStart(2, '0')
+        const yyyy = date.getFullYear()
+        return `${dd}/${mm}/${yyyy}`
+    }
 
     const fetchMembers = useCallback(async (branchId: string) => {
         setIsLoading(true)
@@ -228,16 +248,19 @@ export default function MembersDirectoryPage() {
             }
 
             // Calculate new membership dates
-            const membershipStartDate = new Date()
-
-            // Check if member is expiring soon and has remaining days
-            const memberEndDate = selectedMember.membership_end_date ? new Date(selectedMember.membership_end_date) : null
             const now = new Date()
+            const memberEndDate = selectedMember.membership_end_date ? new Date(selectedMember.membership_end_date) : null
             const isExpiringSoon = memberEndDate && memberEndDate >= now && memberEndDate <= new Date(now.getTime() + 15 * 24 * 60 * 60 * 1000)
 
-            const membershipEndDate = new Date()
+            let membershipStartDate = new Date()
+            let membershipEndDate = new Date()
 
-            if (isExpiringSoon && memberEndDate) {
+            if (isActiveMemberExtension && memberEndDate) {
+                // For active members extending membership, keep current start date and extend from current end date
+                membershipStartDate = new Date(selectedMember.membership_start_date || now)
+                membershipEndDate = new Date(memberEndDate)
+                membershipEndDate.setMonth(membershipEndDate.getMonth() + selectedMembershipPlan.duration_months)
+            } else if (isExpiringSoon && memberEndDate) {
                 // For expiring soon members, add remaining days to new subscription
                 const remainingDays = Math.ceil((memberEndDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
                 const newPlanDays = selectedMembershipPlan.duration_months * 30 // Approximate days in a month
@@ -262,6 +285,13 @@ export default function MembersDirectoryPage() {
             if (updateError) throw updateError
 
             // Record payment
+            let paymentDescription = `Membership renewal for ${selectedMembershipPlan.name}`
+            if (isActiveMemberExtension) {
+                paymentDescription = `Membership extension for ${selectedMembershipPlan.name} (extended from current end date)`
+            } else if (isExpiringSoon) {
+                paymentDescription = `Membership extension for ${selectedMembershipPlan.name} (remaining days added)`
+            }
+
             const { error: paymentError } = await supabase
                 .from('payments')
                 .insert({
@@ -271,14 +301,20 @@ export default function MembersDirectoryPage() {
                     payment_method: 'cash',
                     payment_type: 'membership',
                     status: 'completed',
-                    description: isExpiringSoon ? `Membership extension for ${selectedMembershipPlan.name} (remaining days added)` : `Membership renewal for ${selectedMembershipPlan.name}`,
+                    description: paymentDescription,
                 })
 
             if (paymentError) {
                 console.error('Payment recording failed:', paymentError)
-                toast.warning('Member renewed but payment recording failed')
+                toast.warning('Member membership updated but payment recording failed')
             } else {
-                toast.success(isExpiringSoon ? 'Member subscription extended successfully!' : 'Member renewed successfully!')
+                if (isActiveMemberExtension) {
+                    toast.success('Member membership extended successfully!')
+                } else if (isExpiringSoon) {
+                    toast.success('Member subscription extended successfully!')
+                } else {
+                    toast.success('Member renewed successfully!')
+                }
             }
 
             // Refresh data
@@ -293,10 +329,76 @@ export default function MembersDirectoryPage() {
             setSelectedPlan('')
             setAmountReceived('')
             setIsExtension(false)
+            setIsActiveMemberExtension(false)
 
         } catch (error) {
             console.error('Renewal error:', error)
             toast.error('Failed to renew membership')
+        } finally {
+            setIsRenewing(false)
+        }
+    }
+
+    const handleEditMember = async (e: React.FormEvent) => {
+        e.preventDefault()
+        if (!selectedMember) {
+            toast.error('No member selected')
+            return
+        }
+
+        setIsRenewing(true)
+
+        try {
+            const { error } = await supabase
+                .from('members')
+                .update({
+                    full_name: editForm.full_name,
+                    phone: editForm.phone,
+                    email: editForm.email || null,
+                    gender: editForm.gender,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', selectedMember.id)
+
+            if (error) throw error
+
+            // If address is provided, update the profile as well (if user exists)
+            if (editForm.address && selectedMember.user_id) {
+                const { error: profileError } = await supabase
+                    .from('profiles')
+                    .update({
+                        address: editForm.address,
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', selectedMember.user_id)
+
+                if (profileError) {
+                    console.warn('Failed to update profile address:', profileError)
+                }
+            }
+
+            toast.success('Member details updated successfully!')
+
+            // Refresh data
+            const { data: { user } } = await supabase.auth.getUser()
+            if (user?.user_metadata?.branch_id) {
+                await fetchMembers(user.user_metadata.branch_id)
+            }
+
+            // Reset modal
+            setShowEditModal(false)
+            setSelectedMember(null)
+            setEditForm({
+                full_name: '',
+                phone: '',
+                email: '',
+                gender: '',
+                address: ''
+            })
+
+        } catch (error) {
+            console.error('Edit member error:', error)
+            toast.error('Failed to update member details')
         } finally {
             setIsRenewing(false)
         }
@@ -504,9 +606,9 @@ ${gymName}`
                 accessorKey: 'membership_start_date',
                 header: 'Enrolled On',
                 cell: ({ row }) => (
-                    <div className="flex items-center gap-2 text-stone-600 font-medium">
+                        <div className="flex items-center gap-2 text-stone-600 font-medium">
                         <Calendar className="w-3.5 h-3.5 text-stone-400" />
-                        <span>{new Date(row.getValue('membership_start_date')).toLocaleDateString()}</span>
+                        <span>{formatDate(row.getValue('membership_start_date'))}</span>
                     </div>
                 ),
             },
@@ -516,7 +618,7 @@ ${gymName}`
                 cell: ({ row }) => {
                     const endVal = row.getValue('membership_end_date') as string | undefined
                     if (endVal) {
-                        return <span className="text-stone-700 font-medium">{new Date(endVal).toLocaleDateString()}</span>
+                        return <span className="text-stone-700 font-medium">{formatDate(endVal)}</span>
                     }
                     // try to compute from start date + plan duration
                     const startVal = row.original.membership_start_date
@@ -526,7 +628,7 @@ ${gymName}`
                         if (plan) {
                             const d = new Date(startVal)
                             d.setMonth(d.getMonth() + (plan.duration_months || 0))
-                            return <span className="text-stone-700 font-medium">{d.toLocaleDateString()}</span>
+                            return <span className="text-stone-700 font-medium">{formatDate(d)}</span>
                         }
                     }
                     return <span className="text-stone-500">-</span>
@@ -547,7 +649,7 @@ ${gymName}`
                     if (startVal && planId) {
                         const plan = membershipPlans.find(p => p.id === planId)
                         if (plan) {
-                            const renewalDate = new Date(startVal).toLocaleDateString()
+                            const renewalDate = formatDate(startVal)
                             const duration = `${plan.duration_months} month${plan.duration_months !== 1 ? 's' : ''}`
                             return (
                                 <div className="flex flex-col text-stone-600">
@@ -587,12 +689,61 @@ ${gymName}`
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="bg-white rounded-xl border-green-200 shadow-xl w-40 p-1">
                         <DropdownMenuLabel className="px-2 py-1.5 text-stone-500 text-xs font-semibold uppercase">Manage</DropdownMenuLabel>
-                        <DropdownMenuItem className="cursor-pointer flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-emerald-50 text-stone-700">
+                        <DropdownMenuItem
+                            className="cursor-pointer flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-emerald-50 text-stone-700"
+                            onClick={() => {
+                                setSelectedMember(member)
+                                setShowViewModal(true)
+                            }}
+                        >
                             View Profile
                         </DropdownMenuItem>
-                        <DropdownMenuItem className="cursor-pointer flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-emerald-50 text-stone-700 font-medium">
+                        <DropdownMenuItem
+                            className="cursor-pointer flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-emerald-50 text-stone-700 font-medium"
+                            onClick={() => {
+                                setSelectedMember(member)
+                                setEditForm({
+                                    full_name: member.full_name || '',
+                                    phone: member.phone || '',
+                                    email: member.email || '',
+                                    gender: member.gender || '',
+                                    address: '' // We'll need to fetch this from profiles if needed
+                                })
+                                setShowEditModal(true)
+                            }}
+                        >
                             Edit Details
                         </DropdownMenuItem>
+                        {activeTab === 'active' && !isExpired && !isExpiringSoon && (
+                            <DropdownMenuItem
+                                className="cursor-pointer flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-blue-50 text-blue-700 font-medium"
+                                onClick={async () => {
+                                    // Open extension modal for active members
+                                    setSelectedMember(member)
+                                    setIsExtension(true)
+                                    setIsActiveMemberExtension(true)
+                                    try {
+                                        const { data: { user } } = await supabase.auth.getUser()
+                                        let gymId = user?.user_metadata?.gym_id
+                                        if (!gymId && user) {
+                                            const { data: profile } = await supabase
+                                                .from('profiles')
+                                                .select('gym_id')
+                                                .eq('id', user.id)
+                                                .single()
+                                            gymId = profile?.gym_id
+                                        }
+                                        await fetchMembershipPlans(gymId)
+                                    } catch (err) {
+                                        console.error('Failed to load plans before opening modal:', err)
+                                    }
+                                    setShowRenewalModal(true)
+                                }}
+                            >
+                                <RotateCcw className="w-4 h-4" />
+                                Extend Membership
+                            </DropdownMenuItem>
+                        )}
                         {isExpiringSoon && (
                             <DropdownMenuItem
                                 className="cursor-pointer flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-green-50 text-green-700 font-medium"
@@ -613,6 +764,7 @@ ${gymName}`
                                         const now = new Date()
                                         const isExpiringSoonCheck = memberEndDate && memberEndDate >= now && memberEndDate <= new Date(now.getTime() + 15 * 24 * 60 * 60 * 1000)
                                         setIsExtension(isExpiringSoonCheck || false)
+                                        setIsActiveMemberExtension(false)
                                         try {
                                             const { data: { user } } = await supabase.auth.getUser()
                                             let gymId = user?.user_metadata?.gym_id
@@ -819,7 +971,12 @@ ${gymName}`
                             {isExtension ? 'Extend Membership' : 'Renew Membership'}
                         </DialogTitle>
                         <DialogDescription className="text-stone-500">
-                            {isExtension ? `Extend membership for ${selectedMember?.full_name} (remaining days will be added to new subscription)` : `Renew membership for ${selectedMember?.full_name}`}
+                            {isActiveMemberExtension
+                                ? `Extend membership for ${selectedMember?.full_name} (will be added to current membership end date)`
+                                : isExtension
+                                ? `Extend membership for ${selectedMember?.full_name} (remaining days will be added to new subscription)`
+                                : `Renew membership for ${selectedMember?.full_name}`
+                            }
                         </DialogDescription>
                     </DialogHeader>
                     <form onSubmit={handleRenewal} className="grid gap-6 py-4">
@@ -867,6 +1024,187 @@ ${gymName}`
                                 className="bg-gradient-to-r from-emerald-800 to-teal-800 hover:from-emerald-900 hover:to-teal-900 text-white shadow-lg"
                             >
                                 {isRenewing ? (isExtension ? 'Extending...' : 'Renewing...') : (isExtension ? 'Extend Membership' : 'Renew Membership')}
+                            </Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
+
+            {/* View Profile Modal */}
+            <Dialog open={showViewModal} onOpenChange={setShowViewModal}>
+                <DialogContent className="sm:max-w-[500px] bg-white rounded-2xl border-none shadow-2xl p-6">
+                    <DialogHeader>
+                        <DialogTitle className="text-2xl font-bold bg-gradient-to-r from-emerald-800 to-teal-800 bg-clip-text text-transparent">
+                            Member Profile
+                        </DialogTitle>
+                        <DialogDescription className="text-stone-500">
+                            View detailed information for {selectedMember?.full_name}
+                        </DialogDescription>
+                    </DialogHeader>
+                    {selectedMember && (
+                        <div className="grid gap-6 py-4">
+                            <div className="flex items-center gap-4">
+                                <div className="w-16 h-16 bg-gradient-to-br from-emerald-100 to-teal-100 rounded-xl flex items-center justify-center text-emerald-800 font-black text-xl shadow-sm">
+                                    {(selectedMember.full_name || 'M').substring(0, 1).toUpperCase()}
+                                </div>
+                                <div>
+                                    <h3 className="text-xl font-bold text-stone-900">{selectedMember.full_name}</h3>
+                                    <p className="text-stone-500 capitalize">{selectedMember.gender}</p>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label className="text-stone-600 font-medium">Phone</Label>
+                                    <p className="text-stone-900 font-medium">{selectedMember.phone || 'Not provided'}</p>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label className="text-stone-600 font-medium">Email</Label>
+                                    <p className="text-stone-900 font-medium">{selectedMember.email || 'Not provided'}</p>
+                                </div>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label className="text-stone-600 font-medium">Membership Details</Label>
+                                <div className="bg-gradient-to-r from-emerald-50 to-teal-50 p-4 rounded-xl border border-emerald-200">
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <p className="text-sm text-stone-500">Start Date</p>
+                                            <p className="font-medium text-stone-900">
+                                                {selectedMember.membership_start_date ? formatDate(selectedMember.membership_start_date) : 'Not set'}
+                                            </p>
+                                        </div>
+                                        <div>
+                                            <p className="text-sm text-stone-500">End Date</p>
+                                            <p className="font-medium text-stone-900">
+                                                {selectedMember.membership_end_date ? formatDate(selectedMember.membership_end_date) : 'Not set'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    {selectedMember.membership_plan_id && (
+                                        <div className="mt-3">
+                                            <p className="text-sm text-stone-500">Plan</p>
+                                            <p className="font-medium text-stone-900">
+                                                {membershipPlans.find(p => p.id === selectedMember.membership_plan_id)?.name || 'Unknown Plan'}
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label className="text-stone-600 font-medium">Status</Label>
+                                <div className="flex items-center gap-2">
+                                    <Badge
+                                        variant="outline"
+                                        className={`capitalize font-bold rounded-lg border-2 ${
+                                            selectedMember.status === 'active' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' :
+                                            selectedMember.status === 'inactive' ? 'border-red-200 bg-red-50 text-red-800' :
+                                            'border-amber-200 bg-amber-50 text-amber-800'
+                                        }`}
+                                    >
+                                        {selectedMember.status}
+                                    </Badge>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    <DialogFooter>
+                        <Button
+                            variant="outline"
+                            onClick={() => setShowViewModal(false)}
+                            className="border-stone-200 text-stone-700 hover:bg-stone-50"
+                        >
+                            Close
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Edit Details Modal */}
+            <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
+                <DialogContent className="sm:max-w-[500px] bg-white rounded-2xl border-none shadow-2xl p-6">
+                    <DialogHeader>
+                        <DialogTitle className="text-2xl font-bold bg-gradient-to-r from-emerald-800 to-teal-800 bg-clip-text text-transparent">
+                            Edit Member Details
+                        </DialogTitle>
+                        <DialogDescription className="text-stone-500">
+                            Update information for {selectedMember?.full_name}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <form onSubmit={handleEditMember} className="grid gap-6 py-4">
+                        <div className="grid gap-4">
+                            <div className="grid gap-2">
+                                <Label htmlFor="editFullName" className="text-stone-700 font-medium">Full Name</Label>
+                                <Input
+                                    id="editFullName"
+                                    value={editForm.full_name}
+                                    onChange={(e) => setEditForm(prev => ({ ...prev, full_name: e.target.value }))}
+                                    className="h-11 rounded-xl border-stone-200 focus:border-emerald-500 focus:ring-emerald-500"
+                                    required
+                                />
+                            </div>
+                            <div className="grid gap-2">
+                                <Label htmlFor="editPhone" className="text-stone-700 font-medium">Phone</Label>
+                                <Input
+                                    id="editPhone"
+                                    value={editForm.phone}
+                                    onChange={(e) => setEditForm(prev => ({ ...prev, phone: e.target.value }))}
+                                    className="h-11 rounded-xl border-stone-200 focus:border-emerald-500 focus:ring-emerald-500"
+                                    required
+                                />
+                            </div>
+                            <div className="grid gap-2">
+                                <Label htmlFor="editEmail" className="text-stone-700 font-medium">Email</Label>
+                                <Input
+                                    id="editEmail"
+                                    type="email"
+                                    value={editForm.email}
+                                    onChange={(e) => setEditForm(prev => ({ ...prev, email: e.target.value }))}
+                                    className="h-11 rounded-xl border-stone-200 focus:border-emerald-500 focus:ring-emerald-500"
+                                />
+                            </div>
+                            <div className="grid gap-2">
+                                <Label htmlFor="editGender" className="text-stone-700 font-medium">Gender</Label>
+                                <select
+                                    id="editGender"
+                                    value={editForm.gender}
+                                    onChange={(e) => setEditForm(prev => ({ ...prev, gender: e.target.value }))}
+                                    className="w-full h-11 rounded-xl border border-stone-200 px-3 bg-white focus:border-emerald-500 focus:ring-emerald-500"
+                                    required
+                                >
+                                    <option value="">Select Gender</option>
+                                    <option value="male">Male</option>
+                                    <option value="female">Female</option>
+                                    <option value="other">Other</option>
+                                </select>
+                            </div>
+                            <div className="grid gap-2">
+                                <Label htmlFor="editAddress" className="text-stone-700 font-medium">Address</Label>
+                                <textarea
+                                    id="editAddress"
+                                    value={editForm.address}
+                                    onChange={(e) => setEditForm(prev => ({ ...prev, address: e.target.value }))}
+                                    className="w-full h-20 rounded-xl border border-stone-200 px-3 py-2 bg-white focus:border-emerald-500 focus:ring-emerald-500 resize-none"
+                                    placeholder="Enter address"
+                                />
+                            </div>
+                        </div>
+                        <DialogFooter className="flex justify-end gap-3 pt-4">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => setShowEditModal(false)}
+                                className="border-stone-200 text-stone-700 hover:bg-stone-50"
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                type="submit"
+                                disabled={isRenewing}
+                                className="bg-gradient-to-r from-emerald-800 to-teal-800 hover:from-emerald-900 hover:to-teal-900 text-white shadow-lg"
+                            >
+                                {isRenewing ? 'Updating...' : 'Update Member'}
                             </Button>
                         </DialogFooter>
                     </form>

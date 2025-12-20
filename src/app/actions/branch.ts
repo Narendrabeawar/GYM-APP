@@ -48,7 +48,7 @@ export async function createBranch(prevState: ActionState, formData: FormData): 
         const gymName = gym?.name || 'My Gym'
 
         // 2. Create the Branch Admin User in Auth
-        const { data: user, error: userError } = await supabase.auth.admin.createUser({
+        const { error: userError } = await supabase.auth.admin.createUser({
             email,
             password: 'gymbranch123',
             email_confirm: true,
@@ -121,5 +121,238 @@ export async function deleteBranch(branchId: string): Promise<ActionState> {
     } catch (err) {
         console.error('Unexpected error during branch deletion:', err)
         return { error: 'Failed to delete branch' }
+    }
+}
+
+export type BranchSettings = {
+    // Basic Information
+    branchName: string
+    branchCode: string
+    description: string
+    established_year: string
+    member_capacity: string
+    address: string
+    email: string
+    phone: string
+    whatsapp: string
+    website: string
+    social_media: string
+
+    // Operating Hours
+    operating_hours: Record<string, { open: string; close: string; closed: boolean }>
+
+    // Facilities & Amenities
+    facilities: string[]
+    amenities: string[]
+    special_features: string
+
+    // Gallery (handled separately for file uploads)
+    // images: string[]
+
+    // Additional Information
+    rules: string
+    policies: string
+    emergency_contact: string
+    manager_name: string
+    certifications: string
+    nearby_landmarks: string
+}
+
+export async function saveBranchSettings(branchId: string, formData: FormData, uploadedImages: string[] = []): Promise<ActionState> {
+    if (!branchId) return { error: 'Branch ID is required' }
+
+    const supabase = createAdminClient()
+
+    try {
+        const getString = (key: string, def = '') => {
+            const v = formData.get(key)
+            return v === null ? def : String(v)
+        }
+        const getBool = (key: string) => {
+            const v = formData.get(key)
+            return v === 'on' || v === 'true'
+        }
+        const parseJSON = (key: string) => {
+            const v = formData.get(key)
+            if (!v) return []
+            try {
+                return JSON.parse(String(v))
+            } catch {
+                return []
+            }
+        }
+
+        const branchData: Partial<BranchSettings> = {
+            // Basic Information
+            branchName: getString('branchName'),
+            branchCode: getString('branchCode'),
+            description: getString('description'),
+            established_year: getString('established'),
+            member_capacity: getString('capacity'),
+            address: getString('address'),
+            email: getString('email'),
+            phone: getString('phone'),
+            whatsapp: getString('whatsapp'),
+            website: getString('website'),
+            social_media: getString('socialMedia'),
+
+            // Operating Hours - build JSON object from form data
+            operating_hours: {
+                monday: {
+                    open: getString('mondayOpen', '06:00'),
+                    close: getString('mondayClose', '22:00'),
+                    closed: getBool('mondayClosed')
+                },
+                tuesday: {
+                    open: getString('tuesdayOpen', '06:00'),
+                    close: getString('tuesdayClose', '22:00'),
+                    closed: getBool('tuesdayClosed')
+                },
+                wednesday: {
+                    open: getString('wednesdayOpen', '06:00'),
+                    close: getString('wednesdayClose', '22:00'),
+                    closed: getBool('wednesdayClosed')
+                },
+                thursday: {
+                    open: getString('thursdayOpen', '06:00'),
+                    close: getString('thursdayClose', '22:00'),
+                    closed: getBool('thursdayClosed')
+                },
+                friday: {
+                    open: getString('fridayOpen', '06:00'),
+                    close: getString('fridayClose', '22:00'),
+                    closed: getBool('fridayClosed')
+                },
+                saturday: {
+                    open: getString('saturdayOpen', '06:00'),
+                    close: getString('saturdayClose', '22:00'),
+                    closed: getBool('saturdayClosed')
+                },
+                sunday: {
+                    open: getString('sundayOpen', '06:00'),
+                    close: getString('sundayClose', '22:00'),
+                    closed: getBool('sundayClosed')
+                }
+            },
+
+            // Facilities & Amenities
+            facilities: parseJSON('facilities'),
+            amenities: parseJSON('amenities'),
+
+            // Additional Information
+            rules: getString('rules'),
+            policies: getString('policies'),
+            emergency_contact: getString('emergency'),
+            manager_name: getString('manager'),
+            certifications: getString('certifications'),
+            nearby_landmarks: getString('nearby'),
+        }
+
+        // Handle special fields that need processing
+        const holidayHours = formData.get('holidayHours') as string
+        const peakHours = formData.get('peakHours') as string
+        const specialFeatures = formData.get('specialFeatures') as string
+
+        // Build payload for update
+        const updatePayload: Record<string, unknown> = {
+            name: branchData.branchName,
+            description: branchData.description,
+            established_year: branchData.established_year ? parseInt(branchData.established_year) : null,
+            member_capacity: branchData.member_capacity ? parseInt(branchData.member_capacity) : null,
+            address: branchData.address,
+            phone: branchData.phone,
+            email: branchData.email,
+            website: branchData.website,
+            social_media: branchData.social_media,
+            whatsapp: branchData.whatsapp,
+            operating_hours: branchData.operating_hours,
+            holiday_hours: holidayHours,
+            peak_hours: peakHours,
+            facilities: branchData.facilities,
+            amenities: branchData.amenities,
+            special_features: specialFeatures,
+            images: uploadedImages,
+            rules: branchData.rules,
+            policies: branchData.policies,
+            emergency_contact: branchData.emergency_contact,
+            manager_name: branchData.manager_name,
+            certifications: branchData.certifications,
+            nearby_landmarks: branchData.nearby_landmarks,
+            updated_at: new Date().toISOString()
+        }
+
+        // Try to update; if the database schema is missing columns we will remove them and retry.
+        const maxRetries = 5
+        let attempt = 0
+        let lastError: unknown = null
+
+        while (attempt < maxRetries) {
+            const { error } = await supabase
+                .from('branches')
+                .update(updatePayload)
+                .eq('id', branchId)
+
+            if (!error) {
+                lastError = null
+                break
+            }
+
+            lastError = error
+
+            // Detect missing column name from common Postgres / Supabase messages
+            const msg = String(error.message || '')
+            const singleQuoteMatch = msg.match(/Could not find the '([^']+)' column/i)
+            const doubleQuoteMatch = msg.match(/column \"([^\"]+)\" does not exist/i)
+            const missingCol = singleQuoteMatch ? singleQuoteMatch[1] : doubleQuoteMatch ? doubleQuoteMatch[1] : null
+
+            if (missingCol && Object.prototype.hasOwnProperty.call(updatePayload, missingCol)) {
+                // Remove the problematic column and retry
+                delete updatePayload[missingCol]
+                attempt++
+                continue
+            }
+
+            // If we couldn't parse a missing column or payload doesn't contain it, stop retrying
+            break
+        }
+
+        if (lastError) {
+            console.error('Error updating branch settings after retries:', lastError)
+            const lastErrorMessage =
+                lastError && typeof lastError === 'object' && 'message' in lastError
+                    ? String((lastError as { message?: unknown }).message)
+                    : String(lastError)
+            return { error: 'Failed to save branch settings: ' + lastErrorMessage }
+        }
+
+        revalidatePath('/branch/settings')
+        return { success: true, message: 'Branch information saved successfully' }
+    } catch (err) {
+        console.error('Unexpected error saving branch settings:', err)
+        return { error: 'Something went wrong while saving' }
+    }
+}
+
+export async function getBranchSettings(branchId: string) {
+    if (!branchId) return null
+
+    const supabase = createAdminClient()
+
+    try {
+        const { data: branch, error } = await supabase
+            .from('branches')
+            .select('*')
+            .eq('id', branchId)
+            .single()
+
+        if (error) {
+            console.error('Error fetching branch settings:', error)
+            return null
+        }
+
+        return branch
+    } catch (err) {
+        console.error('Unexpected error fetching branch settings:', err)
+        return null
     }
 }

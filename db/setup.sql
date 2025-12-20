@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS public.gyms (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 1.1 BRANCHES TABLE
+-- 1.1 BRANCHES TABLE (Enhanced with comprehensive branch information)
 CREATE TABLE IF NOT EXISTS public.branches (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     gym_id UUID REFERENCES public.gyms(id) ON DELETE CASCADE,
@@ -30,6 +30,36 @@ CREATE TABLE IF NOT EXISTS public.branches (
     phone TEXT,
     address TEXT,
     status TEXT CHECK (status IN ('active', 'inactive')) DEFAULT 'active',
+
+    -- Basic Information
+    description TEXT,
+    established_year INTEGER,
+    member_capacity INTEGER,
+    website TEXT,
+    social_media TEXT,
+    whatsapp TEXT,
+
+    -- Operating Hours
+    operating_hours JSONB, -- Store weekly schedule as JSON
+    holiday_hours TEXT,
+    peak_hours TEXT,
+
+    -- Facilities & Amenities
+    facilities TEXT[], -- Array of facility names
+    amenities TEXT[], -- Array of amenity names
+    special_features TEXT,
+
+    -- Gallery
+    images TEXT[], -- Array of image URLs
+
+    -- Additional Information
+    rules TEXT, -- Gym rules & regulations
+    policies TEXT, -- Membership policies
+    emergency_contact TEXT,
+    manager_name TEXT,
+    certifications TEXT,
+    nearby_landmarks TEXT,
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
@@ -58,6 +88,26 @@ ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS address TEXT;
 ALTER TABLE public.gyms ADD COLUMN IF NOT EXISTS admin_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL;
 -- Ensure members table has father_name column (safe to run multiple times)
 ALTER TABLE public.members ADD COLUMN IF NOT EXISTS father_name TEXT;
+-- Ensure branches table has images column (safe to run multiple times)
+ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS images TEXT[];
+-- Ensure branches table has other expected columns used by the app
+ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS facilities TEXT[];
+ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS amenities TEXT[];
+ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS operating_hours JSONB;
+ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS holiday_hours TEXT;
+ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS peak_hours TEXT;
+ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS special_features TEXT;
+ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS member_capacity INTEGER;
+ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS established_year INTEGER;
+ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS website TEXT;
+ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS social_media TEXT;
+ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS whatsapp TEXT;
+ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS rules TEXT;
+ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS policies TEXT;
+ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS emergency_contact TEXT;
+ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS manager_name TEXT;
+ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS certifications TEXT;
+ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS nearby_landmarks TEXT;
 
 -- 3. MEMBERSHIP PLANS
 CREATE TABLE IF NOT EXISTS public.membership_plans (
@@ -329,6 +379,54 @@ DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
+
+-- ==========================================
+-- 🗂️ SUPABASE STORAGE SETUP
+-- ==========================================
+
+-- Create storage bucket for gym images
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'gym-images',
+  'gym-images',
+  true,
+  2097152, -- 2MB limit
+  ARRAY['image/jpeg', 'image/png', 'image/webp', 'image/jpg']
+) ON CONFLICT (id) DO NOTHING;
+
+-- ==========================================
+-- ⚠️  STORAGE POLICIES SETUP REQUIRED
+-- ==========================================
+-- Storage policies cannot be created via SQL in Supabase due to permissions.
+-- Please set up the following policies manually in your Supabase Dashboard:
+--
+-- 1. Go to Storage → gym-images bucket → Policies
+-- 2. Create the following policies:
+--
+-- Policy 1: "Users can upload gym images"
+-- - Operation: INSERT
+-- - Policy: bucket_id = 'gym-images' AND auth.role() = 'authenticated'
+--
+-- Policy 2: "Public can view gym images"
+-- - Operation: SELECT
+-- - Policy: bucket_id = 'gym-images'
+--
+-- Policy 3: "Users can update own gym images"
+-- - Operation: UPDATE
+-- - Policy: bucket_id = 'gym-images' AND auth.uid()::text = (storage.foldername(name))[2]
+--
+-- Policy 4: "Users can delete own gym images"
+-- - Operation: DELETE
+-- - Policy: bucket_id = 'gym-images' AND auth.uid()::text = (storage.foldername(name))[2]
+--
+-- These policies allow authenticated users to upload/update/delete their own images
+-- while allowing public access to view all gym images.
+
+-- ==========================================
+-- 🧪 TEST STORAGE SETUP (Optional)
+-- ==========================================
+-- You can run this after setup to verify storage is working:
+-- SELECT * FROM storage.buckets WHERE id = 'gym-images';
 
 -- ==========================================
 -- 🌱 SEED DATA (Optional Initial Plans)
