@@ -67,6 +67,7 @@ interface Enquiry {
   status: string
   created_at: string
   converted_to_member_id?: string
+  branch_id?: string
 }
 
 interface MembershipPlan {

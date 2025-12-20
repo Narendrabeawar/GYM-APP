@@ -62,12 +62,14 @@ export default function ReceptionPaymentsPage() {
 
             let gymId = user?.user_metadata?.gym_id
             if (!gymId) {
-                const { data: profile } = await supabase
-                    .from('profiles')
-                    .select('gym_id')
-                    .eq('id', user.id)
-                    .single()
-                gymId = profile?.gym_id
+                if (user?.id) {
+                    const { data: profile } = await supabase
+                        .from('profiles')
+                        .select('gym_id')
+                        .eq('id', user.id)
+                        .single()
+                    gymId = profile?.gym_id
+                }
             }
 
             if (!gymId) {
@@ -98,7 +100,12 @@ export default function ReceptionPaymentsPage() {
 
             if (error) throw error
 
-            setPayments(data || [])
+            // supabase returns related rows as arrays; normalize member to single object
+            const normalized = (data || []).map((row: any) => ({
+                ...row,
+                member: Array.isArray(row.member) ? row.member[0] ?? null : row.member ?? null,
+            }))
+            setPayments(normalized)
         } catch (error) {
             console.error('Error fetching payments:', error)
             toast.error('Failed to fetch payments')
