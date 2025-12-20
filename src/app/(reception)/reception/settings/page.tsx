@@ -10,14 +10,33 @@ export default function SettingsPage() {
     const router = useRouter()
     const handleOpenMembers = () => router.push('/reception/settings/members')
 
-    // render page
-
     return (
         <div className="space-y-6 p-6">
             <h1 className="text-3xl font-bold">Reception Settings</h1>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                 {Array.from({ length: 9 }).map((_, idx) => {
+                    if (idx !== 0) {
+                        // All cards except first - Coming Soon
+                        return (
+                            <motion.div
+                                key={idx}
+                                className="rounded-xl p-6 bg-linear-to-br from-slate-50 to-slate-100 border border-slate-200 flex flex-col items-center justify-center min-h-64"
+                                initial={{ opacity: 0, y: 8 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ duration: 0.32, ease: 'easeOut' }}
+                            >
+                                <div className="text-center">
+                                    <div className="w-12 h-12 rounded-xl bg-slate-200 flex items-center justify-center mx-auto mb-4">
+                                        <GridIcon className="text-slate-600 w-6 h-6" />
+                                    </div>
+                                    <h3 className="font-semibold text-lg text-stone-700">Coming Soon</h3>
+                                    <p className="text-sm text-stone-500 mt-2">This feature is under development</p>
+                                </div>
+                            </motion.div>
+                        )
+                    }
+
                     const title = idx === 0 ? 'Edit Gym Member' : `Card ${idx + 1}`
                     const variants = [
                         { bg: 'from-emerald-50 to-teal-50', border: 'border-emerald-200', icon: 'text-emerald-700' },
@@ -30,7 +49,7 @@ export default function SettingsPage() {
                     return (
                         <motion.div
                             key={idx}
-                            className={`rounded-xl p-6 cursor-pointer flex flex-col justify-between bg-gradient-to-br ${variant.bg} border ${variant.border}`}
+                            className={`rounded-xl p-6 cursor-pointer flex flex-col justify-between bg-linear-to-br ${variant.bg} border ${variant.border}`}
                             onClick={idx === 0 ? handleOpenMembers : undefined}
                             initial={{ opacity: 0, y: 8 }}
                             animate={{ opacity: 1, y: 0 }}

@@ -138,6 +138,11 @@ CREATE TABLE IF NOT EXISTS public.members (
     date_of_birth DATE,
     gender TEXT CHECK (gender IN ('male', 'female', 'other')),
     address TEXT,
+    blood_group VARCHAR(10),
+    height DECIMAL(5, 2),
+    weight DECIMAL(5, 2),
+    fitness_goal VARCHAR(255),
+    medical_conditions TEXT,
     emergency_contact TEXT,
     emergency_phone TEXT,
     membership_plan_id UUID REFERENCES public.membership_plans(id) ON DELETE SET NULL,
@@ -186,7 +191,11 @@ CREATE TABLE IF NOT EXISTS public.enquiries (
     phone TEXT NOT NULL,
     email TEXT,
     address TEXT NOT NULL,
-    health_info TEXT, -- Medical conditions, allergies, etc.
+    health_info TEXT,
+    blood_group VARCHAR(10),
+    height DECIMAL(5, 2),
+    weight DECIMAL(5, 2),
+    fitness_goal VARCHAR(255),
     emergency_contact_name TEXT,
     emergency_contact_phone TEXT,
     emergency_contact_relationship TEXT,
@@ -194,7 +203,7 @@ CREATE TABLE IF NOT EXISTS public.enquiries (
     status TEXT CHECK (status IN ('pending', 'converted', 'rejected')) DEFAULT 'pending',
     notes TEXT,
     created_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
-    converted_to_member_id UUID REFERENCES public.members(id) ON DELETE SET NULL, -- Link to member after conversion
+    converted_to_member_id UUID REFERENCES public.members(id) ON DELETE SET NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
@@ -491,3 +500,20 @@ EXECUTE PROCEDURE public.sync_member_status();
 
 -- Note: If you want a daily job to mark rows expired without updates, schedule a cron job
 -- using pg_cron or an external scheduler that runs the UPDATE above once per day.
+
+-- ==========================================
+-- 🏥 HEALTH INFORMATION COLUMNS (Safe for existing databases)
+-- ==========================================
+
+-- Add health columns to members table (if not exists)
+ALTER TABLE public.members ADD COLUMN IF NOT EXISTS blood_group VARCHAR(10);
+ALTER TABLE public.members ADD COLUMN IF NOT EXISTS height DECIMAL(5, 2);
+ALTER TABLE public.members ADD COLUMN IF NOT EXISTS weight DECIMAL(5, 2);
+ALTER TABLE public.members ADD COLUMN IF NOT EXISTS fitness_goal VARCHAR(255);
+ALTER TABLE public.members ADD COLUMN IF NOT EXISTS medical_conditions TEXT;
+
+-- Add health columns to enquiries table (if not exists)
+ALTER TABLE public.enquiries ADD COLUMN IF NOT EXISTS blood_group VARCHAR(10);
+ALTER TABLE public.enquiries ADD COLUMN IF NOT EXISTS height DECIMAL(5, 2);
+ALTER TABLE public.enquiries ADD COLUMN IF NOT EXISTS weight DECIMAL(5, 2);
+ALTER TABLE public.enquiries ADD COLUMN IF NOT EXISTS fitness_goal VARCHAR(255);

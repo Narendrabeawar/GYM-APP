@@ -17,6 +17,7 @@ import {
     Menu,
     X,
     Dumbbell,
+    ChevronRight,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -26,10 +27,6 @@ import { toast } from 'sonner'
 const navigation = [
     { name: 'Dashboard', href: '/branch/dashboard', icon: LayoutDashboard },
     { name: 'Operators', href: '/branch/operators', icon: Users },
-    { name: 'Trainers', href: '/branch/trainers', icon: UserCog },
-    { name: 'Members', href: '/branch/members', icon: Users },
-    { name: 'Attendance', href: '/branch/attendance', icon: Calendar },
-    { name: 'Payments', href: '/branch/payments', icon: IndianRupee },
     { name: 'Settings', href: '/branch/settings', icon: Settings },
 ]
 
@@ -83,7 +80,7 @@ export default function BranchLayout({ children }: { children: React.ReactNode }
                 <motion.aside
                     initial={{ x: -300 }}
                     animate={{ x: sidebarOpen ? 0 : -300 }}
-                    className="fixed top-0 left-0 z-50 h-full w-72 bg-white/95 backdrop-blur-xl border-r border-green-200 lg:!transform-none transition-transform duration-300"
+                    className="fixed top-0 left-0 z-50 h-full w-72 bg-white/95 backdrop-blur-xl border-r border-green-200 lg:!transform-none transition-transform duration-300 flex flex-col"
                 >
                     {/* Logo */}
                     <div className="h-16 flex items-center justify-between px-6 border-b border-green-200">
@@ -130,9 +127,25 @@ export default function BranchLayout({ children }: { children: React.ReactNode }
                         })}
                     </nav>
 
-                    {/* User profile */}
-                    <div className="p-4 border-t border-green-200">
-                        <div className="flex items-center gap-3 mb-3">
+                    {/* Reception Desk Link - Separate section above user profile */}
+                    <div className="mt-auto px-4 pb-3">
+                        <Link href="/reception/dashboard" onClick={() => setSidebarOpen(false)}>
+                            <motion.div
+                                whileHover={{ x: 4 }}
+                                whileTap={{ scale: 0.98 }}
+                                className="flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 bg-gradient-to-r from-teal-50 to-emerald-50 text-emerald-900 border border-emerald-200 hover:from-teal-100 hover:to-emerald-100"
+                            >
+                                <Dumbbell className="w-5 h-5" />
+                                <span className="font-medium">Reception Desk</span>
+                                <ChevronRight className="w-4 h-4 ml-auto" />
+                            </motion.div>
+                        </Link>
+                    </div>
+
+                    {/* User profile at very bottom */}
+                    <div className="p-4 border-t border-green-200 space-y-3">
+                        {/* User Info */}
+                        <div className="flex items-center gap-3">
                             <Avatar className="w-10 h-10 border-2 border-white shadow-sm">
                                 <AvatarFallback className="bg-gradient-to-br from-emerald-800 to-teal-800 text-white font-bold">
                                     {userName.substring(0, 2).toUpperCase()}
@@ -143,6 +156,8 @@ export default function BranchLayout({ children }: { children: React.ReactNode }
                                 <p className="text-xs text-stone-500 truncate uppercase">{branchName}</p>
                             </div>
                         </div>
+                        
+                        {/* Sign Out Button */}
                         <Button
                             variant="outline"
                             className="w-full border-emerald-100 text-emerald-800 hover:bg-red-50 hover:text-red-600 hover:border-red-100 transition-all rounded-xl font-medium bg-white"

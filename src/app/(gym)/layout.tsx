@@ -85,7 +85,7 @@ export default function GymLayout({ children }: { children: React.ReactNode }) {
                 <motion.aside
                     initial={{ x: -300 }}
                     animate={{ x: sidebarOpen ? 0 : -300 }}
-                    className="fixed top-0 left-0 z-50 h-full w-72 bg-white/95 backdrop-blur-xl border-r border-green-200 lg:!transform-none transition-transform duration-300"
+                    className="fixed top-0 left-0 z-50 h-full w-72 bg-white/95 backdrop-blur-xl border-r border-green-200 lg:!transform-none transition-transform duration-300 flex flex-col"
                 >
                     {/* Logo */}
                     <div className="h-16 flex items-center justify-between px-6 border-b border-green-200">
@@ -111,7 +111,7 @@ export default function GymLayout({ children }: { children: React.ReactNode }) {
                     </div>
 
                     {/* Navigation */}
-                    <nav className="flex-1 px-4 py-6 space-y-2">
+                    <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
                         {navigation.map((item) => {
                             const isActive = pathname === item.href
                             return (
@@ -132,9 +132,9 @@ export default function GymLayout({ children }: { children: React.ReactNode }) {
                         })}
                     </nav>
 
-                    {/* User profile */}
-                    <div className="p-4 border-t border-green-200">
-                        <div className="flex items-center gap-3 mb-3">
+                    {/* User profile at very bottom */}
+                    <div className="p-4 border-t border-green-200 space-y-3">
+                        <div className="flex items-center gap-3">
                             <Avatar className="w-10 h-10 border-2 border-white shadow-sm">
                                 <AvatarFallback className="bg-gradient-to-br from-emerald-800 to-teal-800 text-white font-bold">
                                     {userName.substring(0, 2).toUpperCase()}

@@ -41,6 +41,7 @@ import {
 } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
+import MemberProfileModal from '@/components/MemberProfileModal'
 // Card removed - rendering table outside card
 
 type Member = {
@@ -1030,96 +1031,12 @@ ${gymName}`
                 </DialogContent>
             </Dialog>
 
-            {/* View Profile Modal */}
-            <Dialog open={showViewModal} onOpenChange={setShowViewModal}>
-                <DialogContent className="sm:max-w-[500px] bg-white rounded-2xl border-none shadow-2xl p-6">
-                    <DialogHeader>
-                        <DialogTitle className="text-2xl font-bold bg-gradient-to-r from-emerald-800 to-teal-800 bg-clip-text text-transparent">
-                            Member Profile
-                        </DialogTitle>
-                        <DialogDescription className="text-stone-500">
-                            View detailed information for {selectedMember?.full_name}
-                        </DialogDescription>
-                    </DialogHeader>
-                    {selectedMember && (
-                        <div className="grid gap-6 py-4">
-                            <div className="flex items-center gap-4">
-                                <div className="w-16 h-16 bg-gradient-to-br from-emerald-100 to-teal-100 rounded-xl flex items-center justify-center text-emerald-800 font-black text-xl shadow-sm">
-                                    {(selectedMember.full_name || 'M').substring(0, 1).toUpperCase()}
-                                </div>
-                                <div>
-                                    <h3 className="text-xl font-bold text-stone-900">{selectedMember.full_name}</h3>
-                                    <p className="text-stone-500 capitalize">{selectedMember.gender}</p>
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label className="text-stone-600 font-medium">Phone</Label>
-                                    <p className="text-stone-900 font-medium">{selectedMember.phone || 'Not provided'}</p>
-                                </div>
-                                <div className="space-y-2">
-                                    <Label className="text-stone-600 font-medium">Email</Label>
-                                    <p className="text-stone-900 font-medium">{selectedMember.email || 'Not provided'}</p>
-                                </div>
-                            </div>
-
-                            <div className="space-y-2">
-                                <Label className="text-stone-600 font-medium">Membership Details</Label>
-                                <div className="bg-gradient-to-r from-emerald-50 to-teal-50 p-4 rounded-xl border border-emerald-200">
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <p className="text-sm text-stone-500">Start Date</p>
-                                            <p className="font-medium text-stone-900">
-                                                {selectedMember.membership_start_date ? formatDate(selectedMember.membership_start_date) : 'Not set'}
-                                            </p>
-                                        </div>
-                                        <div>
-                                            <p className="text-sm text-stone-500">End Date</p>
-                                            <p className="font-medium text-stone-900">
-                                                {selectedMember.membership_end_date ? formatDate(selectedMember.membership_end_date) : 'Not set'}
-                                            </p>
-                                        </div>
-                                    </div>
-                                    {selectedMember.membership_plan_id && (
-                                        <div className="mt-3">
-                                            <p className="text-sm text-stone-500">Plan</p>
-                                            <p className="font-medium text-stone-900">
-                                                {membershipPlans.find(p => p.id === selectedMember.membership_plan_id)?.name || 'Unknown Plan'}
-                                            </p>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-
-                            <div className="space-y-2">
-                                <Label className="text-stone-600 font-medium">Status</Label>
-                                <div className="flex items-center gap-2">
-                                    <Badge
-                                        variant="outline"
-                                        className={`capitalize font-bold rounded-lg border-2 ${
-                                            selectedMember.status === 'active' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' :
-                                            selectedMember.status === 'inactive' ? 'border-red-200 bg-red-50 text-red-800' :
-                                            'border-amber-200 bg-amber-50 text-amber-800'
-                                        }`}
-                                    >
-                                        {selectedMember.status}
-                                    </Badge>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                    <DialogFooter>
-                        <Button
-                            variant="outline"
-                            onClick={() => setShowViewModal(false)}
-                            className="border-stone-200 text-stone-700 hover:bg-stone-50"
-                        >
-                            Close
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            {/* View Profile Modal - Using Reusable Component */}
+            <MemberProfileModal 
+                isOpen={showViewModal} 
+                onClose={() => setShowViewModal(false)} 
+                member={selectedMember} 
+            />
 
             {/* Edit Details Modal */}
             <Dialog open={showEditModal} onOpenChange={setShowEditModal}>

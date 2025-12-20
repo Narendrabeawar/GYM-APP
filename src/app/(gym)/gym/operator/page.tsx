@@ -32,43 +32,135 @@ import {
 
 type Operator = {
     id: string
-    name: string
+    full_name: string
     email: string
     phone: string
-    role: 'manager' | 'receptionist' | 'staff'
-    status: 'active' | 'inactive'
-    created_at: string
+    role: string
+    branch_name: string
+    branch_id: string
 }
 
 export default function OperatorsPage() {
     const [open, setOpen] = useState(false)
-    const [operators, setOperators] = useState<Operator[]>([
-        // Dummy data for now
-        {
-            id: '1',
-            name: 'Amit Kumar',
-            email: 'amit.k@gymflow.com',
-            phone: '+91 98765 43210',
-            role: 'manager',
-            status: 'active',
-            created_at: new Date().toISOString()
-        },
-        {
-            id: '2',
-            name: 'Suresh Patel',
-            email: 'suresh.p@gymflow.com',
-            phone: '+91 98765 43211',
-            role: 'receptionist',
-            status: 'active',
-            created_at: new Date().toISOString()
-        }
-    ])
-    const [isLoading, setIsLoading] = useState(false)
+    const [operators, setOperators] = useState<Operator[]>([])
+    const [isLoading, setIsLoading] = useState(true)
     const [mounted, setMounted] = useState(false)
+    const [selectedRole, setSelectedRole] = useState<string>('')
+    const [selectedBranch, setSelectedBranch] = useState<string>('')
+    const [searchQuery, setSearchQuery] = useState<string>('')
+    const supabase = createClient()
 
     useEffect(() => {
         setMounted(true)
     }, [])
+
+    useEffect(() => {
+        const fetchOperators = async () => {
+            try {
+                setIsLoading(true)
+                const { data: { user } } = await supabase.auth.getUser()
+                
+                if (!user) {
+                    toast.error('User not authenticated')
+                    return
+                }
+
+                // Get gym_id from profiles
+                const { data: profileData } = await supabase
+                    .from('profiles')
+                    .select('gym_id')
+                    .eq('id', user.id)
+                    .single()
+
+                if (!profileData?.gym_id) {
+                    toast.error('Gym not found')
+                    return
+                }
+
+                // Fetch operators (branch_admin and receptionist) with their branch info
+                const { data: operatorsData, error } = await supabase
+                    .from('profiles')
+                    .select(`
+                        id,
+                        full_name,
+                        email,
+                        phone,
+                        role,
+                        branch_id,
+                        branches (
+                            id,
+                            name
+                        )
+                    `)
+                    .eq('gym_id', profileData.gym_id)
+                    .in('role', ['branch_admin', 'receptionist'])
+
+                if (error) {
+                    console.error('Error fetching operators:', error)
+                    toast.error('Failed to fetch operators')
+                    return
+                }
+
+                // Get full user data including metadata for branch info fallback
+                const { data: { users }, error: usersError } = await supabase.auth.admin.listUsers()
+                const userMetadata = new Map(
+                    (users || [])
+                        .filter(u => (operatorsData || []).some(op => op.id === u.id))
+                        .map(u => [u.id, u.user_metadata || {}])
+                )
+
+                // Format the data
+                const formattedOperators: Operator[] = (operatorsData || []).map((op: any) => {
+                    const metadata = userMetadata.get(op.id) || {}
+                    return {
+                        id: op.id,
+                        full_name: op.full_name || 'N/A',
+                        email: op.email || 'N/A',
+                        phone: op.phone || 'N/A',
+                        role: op.role || 'N/A',
+                        branch_name: op.branches?.name || metadata?.branch_name || 'No Branch',
+                        branch_id: op.branch_id || metadata?.branch_id || 'N/A'
+                    }
+                })
+
+                setOperators(formattedOperators)
+            } catch (error) {
+                console.error('Error:', error)
+                toast.error('Failed to load operators')
+            } finally {
+                setIsLoading(false)
+            }
+        }
+
+        if (mounted) {
+            fetchOperators()
+        }
+    }, [mounted, supabase])
+
+    // Get unique roles and branches for filter dropdowns
+    const uniqueRoles = useMemo(() => {
+        const roles = [...new Set(operators.map(op => op.role))]
+        return roles.sort()
+    }, [operators])
+
+    const uniqueBranches = useMemo(() => {
+        const branches = [...new Set(operators.map(op => op.branch_name))]
+        return branches.sort()
+    }, [operators])
+
+    // Filter operators based on selected filters
+    const filteredOperators = useMemo(() => {
+        return operators.filter(op => {
+            const matchesRole = !selectedRole || op.role === selectedRole
+            const matchesBranch = !selectedBranch || op.branch_name === selectedBranch
+            const matchesSearch = !searchQuery || 
+                op.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                op.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                op.phone.includes(searchQuery)
+            
+            return matchesRole && matchesBranch && matchesSearch
+        })
+    }, [operators, selectedRole, selectedBranch, searchQuery])
 
     const columns = useMemo<ColumnDef<Operator>[]>(() => [
         {
@@ -76,15 +168,24 @@ export default function OperatorsPage() {
             cell: ({ row }) => <span className="font-medium">{row.index + 1}</span>,
         },
         {
-            accessorKey: 'name',
+            accessorKey: 'full_name',
             header: 'Operator Name',
             cell: ({ row }) => (
                 <div className="flex items-center gap-2">
                     <div className="w-8 h-8 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-800 font-bold text-xs">
-                        {(row.getValue('name') as string).substring(0, 1)}
+                        {(row.getValue('full_name') as string).substring(0, 1)}
                     </div>
-                    <span className="font-bold text-stone-900">{row.getValue('name')}</span>
+                    <span className="font-bold text-stone-900">{row.getValue('full_name')}</span>
                 </div>
+            ),
+        },
+        {
+            accessorKey: 'branch_name',
+            header: 'Branch',
+            cell: ({ row }) => (
+                <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-800 capitalize">
+                    {row.getValue('branch_name')}
+                </Badge>
             ),
         },
         {
@@ -121,24 +222,6 @@ export default function OperatorsPage() {
             ),
         },
         {
-            accessorKey: 'status',
-            header: 'Status',
-            cell: ({ row }) => {
-                const status = row.getValue('status') as string
-                return (
-                    <Badge
-                        variant="outline"
-                        className={`capitalize ${status === 'active'
-                            ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                            : 'border-amber-200 bg-amber-50 text-amber-800'
-                            }`}
-                    >
-                        {status}
-                    </Badge>
-                )
-            },
-        },
-        {
             id: 'actions',
             header: 'Actions',
             cell: ({ row }) => {
@@ -165,8 +248,6 @@ export default function OperatorsPage() {
         },
     ], [])
 
-    if (!mounted) return null
-
     return (
         <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -184,7 +265,7 @@ export default function OperatorsPage() {
                             Add New Operator
                         </Button>
                     </DialogTrigger>
-                    <DialogContent className="sm:max-w-md bg-white rounded-[24px] border-none shadow-2xl p-0 overflow-hidden">
+                    <DialogContent className="sm:max-w-md bg-white rounded-3xl border-none shadow-2xl p-0 overflow-hidden">
                         <div className="p-6 space-y-6">
                             <DialogHeader>
                                 <DialogTitle className="text-2xl font-bold text-stone-900">Create Operator Account</DialogTitle>
@@ -199,7 +280,7 @@ export default function OperatorsPage() {
                                         id="operatorName"
                                         placeholder="Enter Operator's Name"
                                         required
-                                        className="h-12 rounded-xl !bg-white border-2 border-emerald-600/30 text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20 focus-visible:ring-2 focus-visible:ring-emerald-600/20 focus-visible:border-emerald-600 transition-all font-medium outline-none"
+                                        className="h-12 rounded-xl bg-white! border-2 border-emerald-600/30 text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20 focus-visible:ring-2 focus-visible:ring-emerald-600/20 focus-visible:border-emerald-600 transition-all font-medium outline-none"
                                     />
                                 </div>
                                 <div className="grid grid-cols-2 gap-4">
@@ -220,7 +301,7 @@ export default function OperatorsPage() {
                                             id="phone"
                                             placeholder="+91 00000 00000"
                                             required
-                                            className="h-12 rounded-xl !bg-white border-2 border-emerald-600/30 text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20 focus-visible:ring-2 focus-visible:ring-emerald-600/20 focus-visible:border-emerald-600 transition-all font-medium outline-none"
+                                            className="h-12 rounded-xl bg-white! border-2 border-emerald-600/30 text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20 focus-visible:ring-2 focus-visible:ring-emerald-600/20 focus-visible:border-emerald-600 transition-all font-medium outline-none"
                                         />
                                     </div>
                                 </div>
@@ -231,7 +312,7 @@ export default function OperatorsPage() {
                                         type="email"
                                         placeholder="operator@gymflow.com"
                                         required
-                                        className="h-12 rounded-xl !bg-white border-2 border-emerald-600/30 text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20 focus-visible:ring-2 focus-visible:ring-emerald-600/20 focus-visible:border-emerald-600 transition-all font-medium outline-none"
+                                        className="h-12 rounded-xl bg-white! border-2 border-emerald-600/30 text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20 focus-visible:ring-2 focus-visible:ring-emerald-600/20 focus-visible:border-emerald-600 transition-all font-medium outline-none"
                                     />
                                 </div>
 
@@ -257,6 +338,58 @@ export default function OperatorsPage() {
                 </Dialog>
             </div>
 
+            {/* Filters Section */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="space-y-2">
+                    <Label className="text-sm font-medium text-stone-700">Search</Label>
+                    <Input
+                        placeholder="Search by name, email, or phone..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="h-10 rounded-lg border-emerald-200 focus:border-emerald-600 focus:ring-emerald-600/20"
+                    />
+                </div>
+
+                <div className="space-y-2">
+                    <Label className="text-sm font-medium text-stone-700">Role</Label>
+                    <select
+                        value={selectedRole}
+                        onChange={(e) => setSelectedRole(e.target.value)}
+                        className="h-10 w-full px-3 rounded-lg border border-emerald-200 bg-white text-stone-900 text-sm focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20 transition-all cursor-pointer"
+                    >
+                        <option value="">All Roles</option>
+                        {uniqueRoles.map((role) => (
+                            <option key={role} value={role}>
+                                {role.charAt(0).toUpperCase() + role.slice(1)}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+
+                <div className="space-y-2">
+                    <Label className="text-sm font-medium text-stone-700">Branch</Label>
+                    <select
+                        value={selectedBranch}
+                        onChange={(e) => setSelectedBranch(e.target.value)}
+                        className="h-10 w-full px-3 rounded-lg border border-emerald-200 bg-white text-stone-900 text-sm focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20 transition-all cursor-pointer"
+                    >
+                        <option value="">All Branches</option>
+                        {uniqueBranches.map((branch) => (
+                            <option key={branch} value={branch}>
+                                {branch}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+
+                <div className="space-y-2">
+                    <Label className="text-sm font-medium text-stone-700">Results</Label>
+                    <div className="h-10 rounded-lg border border-emerald-200 bg-emerald-50 flex items-center justify-center">
+                        <span className="font-bold text-emerald-800">{filteredOperators.length} operators</span>
+                    </div>
+                </div>
+            </div>
+
             <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -268,8 +401,13 @@ export default function OperatorsPage() {
                         <Loader2 className="w-10 h-10 text-emerald-800 animate-spin" />
                         <p className="text-stone-500 font-medium animate-pulse">Loading Operators...</p>
                     </div>
+                ) : filteredOperators.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-20 gap-4">
+                        <User className="w-12 h-12 text-stone-300" />
+                        <p className="text-stone-500 font-medium">No operators found matching your filters</p>
+                    </div>
                 ) : (
-                    <DataTable columns={columns} data={operators} />
+                    <DataTable columns={columns} data={filteredOperators} />
                 )}
             </motion.div>
         </div>

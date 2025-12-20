@@ -70,7 +70,8 @@ export async function middleware(request: NextRequest) {
         if (role === 'gym_admin' && (pathname.startsWith('/dashboard') || pathname.startsWith('/branch') || pathname.startsWith('/reception'))) {
             return NextResponse.redirect(new URL('/gym/dashboard', request.url))
         }
-        if (role === 'branch_admin' && (pathname.startsWith('/dashboard') || pathname.startsWith('/gym') || pathname.startsWith('/reception'))) {
+        // Branch admin can access both /branch and /reception routes
+        if (role === 'branch_admin' && (pathname.startsWith('/dashboard') || pathname.startsWith('/gym'))) {
             return NextResponse.redirect(new URL('/branch/dashboard', request.url))
         }
         if (role === 'receptionist' && (pathname.startsWith('/dashboard') || pathname.startsWith('/gym') || pathname.startsWith('/branch'))) {

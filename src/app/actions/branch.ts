@@ -14,16 +14,19 @@ export async function createBranch(prevState: ActionState, formData: FormData): 
     const branchName = formData.get('branchName') as string
     const phone = formData.get('phone') as string
     const address = formData.get('address') as string
-    const gymId = formData.get('gymId') as string // Current gym admin's gym ID
+    const gymId = formData.get('gymId') as string
+    
+    // Manager name only - email and phone will be branch's
+    const managerName = formData.get('managerName') as string
 
-    if (!email || !branchName || !phone || !gymId) {
-        return { error: 'Branch Name, Email, and Phone Number are required' }
+    if (!email || !branchName || !phone || !gymId || !managerName) {
+        return { error: 'All fields including Manager Name are required' }
     }
 
     const supabase = createAdminClient()
 
     try {
-        // 1. Create the Branch record
+        // 1. Create the Branch record with manager name
         const { data: branch, error: branchError } = await supabase
             .from('branches')
             .insert({
@@ -32,6 +35,7 @@ export async function createBranch(prevState: ActionState, formData: FormData): 
                 phone: phone,
                 address: address,
                 gym_id: gymId,
+                manager_name: managerName,
                 status: 'active'
             })
             .select()
@@ -39,7 +43,6 @@ export async function createBranch(prevState: ActionState, formData: FormData): 
 
         if (branchError) {
             console.error('Error creating branch:', branchError)
-            // If the table doesn't exist, we'll get an error here.
             return { error: 'Failed to create branch record: ' + branchError.message }
         }
 
@@ -47,14 +50,14 @@ export async function createBranch(prevState: ActionState, formData: FormData): 
         const { data: gym } = await supabase.from('gyms').select('name').eq('id', gymId).single()
         const gymName = gym?.name || 'My Gym'
 
-        // 2. Create the Branch Admin User in Auth
-        const { error: userError } = await supabase.auth.admin.createUser({
-            email,
+        // 2. Create the Branch Manager User in Auth using branch email
+        const { data: authData, error: userError } = await supabase.auth.admin.createUser({
+            email: email, // Using branch email for manager login
             password: 'gymbranch123',
             email_confirm: true,
             user_metadata: {
                 role: 'branch_admin',
-                full_name: branchName + ' Manager',
+                full_name: managerName,
                 gym_id: gymId,
                 branch_id: branch.id,
                 branch_name: branchName,
@@ -66,14 +69,35 @@ export async function createBranch(prevState: ActionState, formData: FormData): 
         if (userError) {
             // Rollback: delete the branch if user creation fails
             await supabase.from('branches').delete().eq('id', branch.id)
-            console.error('Error creating branch user:', userError)
+            console.error('Error creating branch manager user:', userError)
             return { error: userError.message }
+        }
+
+        // 3. Create/Update Profile entry for the manager
+        if (authData?.user) {
+            const { error: profileError } = await supabase
+                .from('profiles')
+                .upsert({
+                    id: authData.user.id,
+                    email: email, // Branch email
+                    full_name: managerName,
+                    phone: phone, // Branch phone
+                    role: 'branch_admin',
+                    gym_id: gymId,
+                    branch_id: branch.id,
+                    updated_at: new Date().toISOString()
+                })
+
+            if (profileError) {
+                console.error('Error creating manager profile:', profileError)
+                // Continue anyway - profile might be created by trigger
+            }
         }
 
         revalidatePath('/gym/listed-branches')
         return {
             success: true,
-            message: `Branch "${branchName}" created successfully. Login: ${email}, Default Password: "gymbranch123"`
+            message: `Branch "${branchName}" created successfully with manager "${managerName}". Login: ${email}, Password: "gymbranch123"`
         }
     } catch (err) {
         console.error('Unexpected error:', err)

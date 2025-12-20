@@ -1,6 +1,7 @@
  'use client'
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -8,13 +9,8 @@ import { Input } from '@/components/ui/input'
 import { DataTable } from '@/components/ui/data-table'
 import { ColumnDef } from '@tanstack/react-table'
 import { toast } from 'sonner'
-import {
-    Dialog,
-    DialogContent,
-    DialogTitle,
-    DialogDescription,
-} from '@/components/ui/dialog'
-import {} from 'lucide-react'
+import Link from 'next/link'
+import MemberProfileModal from '@/components/MemberProfileModal'
 
 type Member = {
     id: string
@@ -31,17 +27,17 @@ type Member = {
 
 export default function EditMembersPage() {
     const supabase = createClient()
+    const router = useRouter()
     const [members, setMembers] = useState<Member[]>([])
     const [isLoading, setIsLoading] = useState(true)
     const [mounted, setMounted] = useState(false)
     const [searchQuery, setSearchQuery] = useState('')
-    const [selectedMember, setSelectedMember] = useState<Member | null>(null)
-    const [showEditModal, setShowEditModal] = useState(false)
-    const [isSaving, setIsSaving] = useState(false)
     const [page, setPage] = useState(1)
     const [pageSize, setPageSize] = useState(15)
     const [total, setTotal] = useState(0)
     const [statusFilter, setStatusFilter] = useState<string | ''>('')
+    const [selectedMember, setSelectedMember] = useState<Member | null>(null)
+    const [showProfileModal, setShowProfileModal] = useState(false)
 
     const fetchMembers = useCallback(async (opts?: { page?: number, size?: number }) => {
         setIsLoading(true)
@@ -118,7 +114,10 @@ export default function EditMembersPage() {
                 const m = row.original
                 return (
                     <div className="flex items-center gap-2">
-                        <Button size="sm" variant="outline" onClick={() => { setSelectedMember(m); setShowEditModal(true) }}>Edit</Button>
+                        <Button size="sm" variant="outline" onClick={() => { setSelectedMember(m); setShowProfileModal(true) }}>View</Button>
+                        <Link href={`/reception/settings/members/${m.id}/edit`}>
+                            <Button size="sm" variant="outline">Edit</Button>
+                        </Link>
                         <Button size="sm" variant="ghost" className="text-red-600" onClick={() => handleDelete(m)}>Delete</Button>
                     </div>
                 )
@@ -126,37 +125,10 @@ export default function EditMembersPage() {
         }
     ], [page, pageSize, handleDelete])
 
-    const handleSave = async (e: React.FormEvent) => {
-        e.preventDefault()
-        if (!selectedMember) return
-        setIsSaving(true)
-        try {
-            const payload: Partial<Member> = {
-                full_name: selectedMember.full_name,
-                father_name: selectedMember.father_name || undefined,
-                phone: selectedMember.phone,
-                emergency_contact: selectedMember.emergency_contact || undefined,
-                email: selectedMember.email,
-                status: selectedMember.status,
-            }
-            const { error } = await supabase.from('members').update(payload).eq('id', selectedMember.id)
-            if (error) throw error
-            toast.success('Member updated')
-            await fetchMembers({ page, size: pageSize })
-            setShowEditModal(false)
-            setSelectedMember(null)
-        } catch (err) {
-            console.error('Update failed', err)
-            toast.error('Failed to update member')
-        } finally {
-            setIsSaving(false)
-        }
-    }
-
     if (!mounted) return null
 
     return (
-        <div className={`p-6 space-y-6 ${showEditModal ? 'pointer-events-none select-none opacity-40 blur-sm' : ''}`}>
+        <div className="p-6 space-y-6">
             <h1 className="text-2xl font-bold">Edit Gym Members</h1>
             <div className="flex items-center gap-4">
                 <Input placeholder="Search by name, phone or father name" value={searchQuery} onChange={(e) => { setSearchQuery(e.target.value); setPage(1) }} className="max-w-sm" />
@@ -230,28 +202,12 @@ export default function EditMembersPage() {
                 </div>
             </div>
 
-            <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
-                <DialogContent className="sm:max-w-[520px] z-50 bg-gradient-to-r from-emerald-50 to-emerald-100 rounded-2xl border border-emerald-200 shadow-2xl p-6">
-                    <div className="mb-2">
-                        <DialogTitle className="text-xl font-bold text-emerald-900">Edit Member</DialogTitle>
-                        <DialogDescription className="text-sm text-stone-500 mt-1">Edit details for the selected member</DialogDescription>
-                    </div>
-                    <form onSubmit={handleSave} className="grid gap-3 py-2">
-                        <Input value={selectedMember?.full_name || ''} onChange={(e) => setSelectedMember(prev => prev ? { ...prev, full_name: e.target.value } : prev)} placeholder="Full name" />
-                        <Input value={selectedMember?.father_name || ''} onChange={(e) => setSelectedMember(prev => prev ? { ...prev, father_name: e.target.value } : prev)} placeholder="Father's name" />
-                        <Input value={selectedMember?.phone || ''} onChange={(e) => setSelectedMember(prev => prev ? { ...prev, phone: e.target.value } : prev)} placeholder="Phone" />
-                        <Input value={selectedMember?.emergency_contact || ''} onChange={(e) => setSelectedMember(prev => prev ? { ...prev, emergency_contact: e.target.value } : prev)} placeholder="Emergency contact" />
-                        <Input value={selectedMember?.email || ''} onChange={(e) => setSelectedMember(prev => prev ? { ...prev, email: e.target.value } : prev)} placeholder="Email" />
-                        <Input value={selectedMember?.status || ''} onChange={(e) => setSelectedMember(prev => prev ? { ...prev, status: e.target.value } : prev)} placeholder="Status" />
-                        <div className="flex items-center justify-end gap-3 pt-3">
-                            <Button variant="outline" onClick={() => { setShowEditModal(false); setSelectedMember(null) }}>Cancel</Button>
-                            <Button type="submit" className="bg-gradient-to-r from-emerald-800 to-teal-800 text-white" disabled={isSaving}>
-                                {isSaving ? 'Saving...' : 'Save'}
-                            </Button>
-                        </div>
-                    </form>
-                </DialogContent>
-            </Dialog>
+            {/* Member Profile Modal */}
+            <MemberProfileModal 
+                isOpen={showProfileModal} 
+                onClose={() => setShowProfileModal(false)} 
+                member={selectedMember} 
+            />
         </div>
     )
 }

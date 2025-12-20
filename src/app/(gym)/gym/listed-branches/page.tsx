@@ -306,6 +306,25 @@ export default function ListedBranchesPage() {
                                     />
                                 </div>
 
+                                {/* Manager Details Section */}
+                                <div className="border-t border-stone-200 pt-4 space-y-4">
+                                    <div>
+                                        <h3 className="text-lg font-bold text-stone-900">Branch Manager Details</h3>
+                                        <p className="text-xs text-stone-500 mt-1">Assign a manager who will handle this branch operations</p>
+                                    </div>
+                                    
+                                    <div className="space-y-2">
+                                        <Label htmlFor="managerName" className="text-stone-700 font-medium text-sm">Manager Name</Label>
+                                        <Input
+                                            id="managerName"
+                                            name="managerName"
+                                            placeholder="e.g. Rajesh Kumar"
+                                            required
+                                            className="h-12 rounded-xl !bg-white border-2 border-emerald-600/30 text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20 focus-visible:ring-2 focus-visible:ring-emerald-600/20 focus-visible:border-emerald-600 transition-all font-medium outline-none"
+                                        />
+                                    </div>
+                                </div>
+
                                 {state?.error && (
                                     <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-600 text-sm font-medium">
                                         {state.error}

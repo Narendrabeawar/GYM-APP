@@ -46,6 +46,10 @@ interface EnquiryFormData {
   email: string
   address: string
   health_info: string
+  blood_group: string
+  height: string
+  weight: string
+  fitness_goal: string
   emergency_contact_name: string
   emergency_contact_phone: string
   emergency_contact_relationship: string
@@ -60,6 +64,10 @@ interface Enquiry {
   email?: string
   address: string
   health_info?: string
+  blood_group?: string
+  height?: number
+  weight?: number
+  fitness_goal?: string
   emergency_contact_name?: string
   emergency_contact_phone?: string
   emergency_contact_relationship?: string
@@ -399,6 +407,10 @@ export default function NewEnquiryForm() {
     email: '',
     address: '',
     health_info: '',
+    blood_group: '',
+    height: '',
+    weight: '',
+    fitness_goal: '',
     emergency_contact_name: '',
     emergency_contact_phone: '',
     emergency_contact_relationship: '',
@@ -442,6 +454,10 @@ export default function NewEnquiryForm() {
           email: formData.email || null,
           address: formData.address,
           health_info: formData.health_info || null,
+          blood_group: formData.blood_group || null,
+          height: formData.height ? parseFloat(formData.height) : null,
+          weight: formData.weight ? parseFloat(formData.weight) : null,
+          fitness_goal: formData.fitness_goal || null,
           emergency_contact_name: formData.emergency_contact_name || null,
           emergency_contact_phone: formData.emergency_contact_phone || null,
           emergency_contact_relationship: formData.emergency_contact_relationship || null,
@@ -598,6 +614,11 @@ export default function NewEnquiryForm() {
               email: selectedEnquiry.email || null,
               phone: selectedEnquiry.phone,
               address: selectedEnquiry.address,
+              blood_group: selectedEnquiry.blood_group || null,
+              height: selectedEnquiry.height ? parseFloat(selectedEnquiry.height as any) : null,
+              weight: selectedEnquiry.weight ? parseFloat(selectedEnquiry.weight as any) : null,
+              fitness_goal: selectedEnquiry.fitness_goal || null,
+              medical_conditions: selectedEnquiry.health_info || null,
               emergency_contact: selectedEnquiry.emergency_contact_name || null,
               emergency_phone: selectedEnquiry.emergency_contact_phone || null,
               membership_plan_id: membershipPlanId,
@@ -898,21 +919,79 @@ export default function NewEnquiryForm() {
           {/* Health Info Tab */}
           <TabsContent value="health" className="space-y-6 mt-8">
             <div className="bg-gradient-to-br from-red-50/50 to-pink-50/50 p-6 rounded-xl border border-red-200/30 space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <Label htmlFor="blood_group" className="text-sm font-medium">
+                    🩸 Blood Group
+                  </Label>
+                  <Input
+                    id="blood_group"
+                    type="text"
+                    placeholder="e.g., O+, A-, B+"
+                    value={formData.blood_group}
+                    onChange={(e) => handleInputChange('blood_group', e.target.value)}
+                    className="border-stone-200 focus:border-emerald-500 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="fitness_goal" className="text-sm font-medium">
+                    🎯 Fitness Goal
+                  </Label>
+                  <Input
+                    id="fitness_goal"
+                    type="text"
+                    placeholder="e.g., Weight Loss, Muscle Gain, Flexibility"
+                    value={formData.fitness_goal}
+                    onChange={(e) => handleInputChange('fitness_goal', e.target.value)}
+                    className="border-stone-200 focus:border-emerald-500 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="height" className="text-sm font-medium">
+                    📏 Height (cm)
+                  </Label>
+                  <Input
+                    id="height"
+                    type="number"
+                    placeholder="Enter height in cm"
+                    value={formData.height}
+                    onChange={(e) => handleInputChange('height', e.target.value)}
+                    className="border-stone-200 focus:border-emerald-500 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="weight" className="text-sm font-medium">
+                    ⚖️ Weight (kg)
+                  </Label>
+                  <Input
+                    id="weight"
+                    type="number"
+                    placeholder="Enter weight in kg"
+                    value={formData.weight}
+                    onChange={(e) => handleInputChange('weight', e.target.value)}
+                    className="border-stone-200 focus:border-emerald-500 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+
               <div className="space-y-2">
-              <Label htmlFor="health_info" className="text-sm font-medium">
-                Medical Conditions / Health Information
-              </Label>
-              <Textarea
-                id="health_info"
-                placeholder="Any medical conditions, allergies, medications, or health concerns..."
-                value={formData.health_info}
-                onChange={(e) => handleInputChange('health_info', e.target.value)}
-                rows={6}
-                className="border-stone-200 focus:border-emerald-500 focus:ring-emerald-500"
-              />
-              <p className="text-xs text-stone-500">
-                Include any injuries, chronic conditions, allergies, or medications
-              </p>
+                <Label htmlFor="health_info" className="text-sm font-medium">
+                  🏥 Medical Conditions / Health Information
+                </Label>
+                <Textarea
+                  id="health_info"
+                  placeholder="Any medical conditions, allergies, medications, or health concerns..."
+                  value={formData.health_info}
+                  onChange={(e) => handleInputChange('health_info', e.target.value)}
+                  rows={6}
+                  className="border-stone-200 focus:border-emerald-500 focus:ring-emerald-500"
+                />
+                <p className="text-xs text-stone-500">
+                  Include any injuries, chronic conditions, allergies, or medications
+                </p>
               </div>
             </div>
           </TabsContent>
