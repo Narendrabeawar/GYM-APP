@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
 import { motion } from 'framer-motion'
-import { Dumbbell, Eye, EyeOff, Loader2 } from 'lucide-react'
+import { Eye, EyeOff, Loader2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -81,11 +81,11 @@ export default function SignInPage() {
                     <div className="max-w-md mx-auto w-full space-y-8">
                         {/* Header */}
                         <div>
-                            <div className="w-12 h-12 bg-emerald-900 rounded-xl flex items-center justify-center mb-6">
-                                <Dumbbell className="w-6 h-6 text-white" />
+                            <div className="w-12 h-12 rounded-xl flex items-center justify-center mb-6 overflow-hidden">
+                                <Image src="/images/Gymzi logo App.png" alt="Gymzi" width={48} height={48} className="object-contain" />
                             </div>
                             <h1 className="text-3xl font-bold text-stone-900 tracking-tight">
-                                Welcome Back
+                                Welcome Back to Gymzi
                             </h1>
                             <p className="mt-2 text-stone-500">
                                 Enter your details to access your account.
@@ -99,7 +99,7 @@ export default function SignInPage() {
                                 <Input
                                     id="email"
                                     type="email"
-                                    placeholder="admin@gymflow.com"
+                                    placeholder="admin@Gymzi.com"
                                     value={email}
                                     onChange={(e) => setEmail(e.target.value)}
                                     required
@@ -155,7 +155,7 @@ export default function SignInPage() {
 
                         {/* Footer */}
                         <div className="text-center text-sm text-stone-500">
-                            Don't have an account?{' '}
+                            Don&apos;t have an account?{' '}
                             <Link href="/signup" className="text-emerald-800 font-bold hover:text-emerald-950 transition-colors">
                                 Sign up
                             </Link>

@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
+import Image from 'next/image'
 import {
     LayoutDashboard,
     Users,
@@ -75,11 +76,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     {/* Logo */}
                     <div className="h-16 flex items-center justify-between px-6 border-b border-green-200">
                         <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-gradient-to-br from-emerald-800 to-teal-800 rounded-xl flex items-center justify-center shadow-lg">
-                                <Dumbbell className="w-5 h-5 text-white" />
+                            <div className="w-10 h-10 rounded-xl flex items-center justify-center shadow-lg overflow-hidden">
+                                <Image src="/images/Gymzi logo App.png" alt="Gymzi" width={40} height={40} className="object-contain" />
                             </div>
                             <span className="text-xl font-bold bg-gradient-to-r from-emerald-800 to-teal-800 bg-clip-text text-transparent">
-                                GymFlow
+                                Gymzi
                             </span>
                         </div>
                         <Button

@@ -1,5 +1,5 @@
 export const APP_CONFIG = {
-    name: process.env.NEXT_PUBLIC_APP_NAME || 'GymFlow',
+    name: process.env.NEXT_PUBLIC_APP_NAME || 'Gymzi',
     url: process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
     description: 'Modern Gym Management System',
 } as const

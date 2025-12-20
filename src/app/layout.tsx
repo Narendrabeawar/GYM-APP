@@ -19,8 +19,8 @@ const satoshi = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "GymFlow - Modern Gym Management System",
-  description: "Manage your gym with ease using GymFlow - Complete gym management solution with member tracking, payments, and analytics.",
+  title: "Gymzi - Modern Gym Management System",
+  description: "Manage your gym with ease using Gymzi - Complete gym management solution with member tracking, payments, and analytics.",
   keywords: ["gym management", "fitness", "gym software", "member management"],
 };
 
