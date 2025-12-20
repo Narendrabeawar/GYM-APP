@@ -197,7 +197,13 @@ export async function saveBranchSettings(branchId: string, formData: FormData, u
             social_media: getString('socialMedia'),
 
             // Operating Hours - build JSON object from form data
-            operating_hours: {
+            operating_hours: (() => {
+                const mondayOpen = getString('mondayOpen');
+                const mondayClose = getString('mondayClose');
+                console.log('Operating Hours Debug:');
+                console.log('mondayOpen:', mondayOpen, 'mondayClose:', mondayClose);
+
+                const hours = {
                 monday: {
                     open: getString('mondayOpen'),
                     close: getString('mondayClose'),
@@ -233,7 +239,10 @@ export async function saveBranchSettings(branchId: string, formData: FormData, u
                     close: getString('sundayClose'),
                     closed: getBool('sundayClosed')
                 }
-            },
+            };
+            console.log('Built operating hours:', hours);
+            return hours;
+            })(),
 
             // Facilities & Amenities
             facilities: parseJSON('facilities'),
