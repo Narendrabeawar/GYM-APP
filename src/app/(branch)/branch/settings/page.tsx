@@ -427,7 +427,6 @@ export default function BranchSettingsPage() {
         try {
             const formData = new FormData(event.currentTarget)
 
-            console.log('Submitting form - Current operatingHours state:', JSON.stringify(operatingHours, null, 2))
 
 
             const result = await saveBranchSettings(branchId, formData, uploadedImages)
