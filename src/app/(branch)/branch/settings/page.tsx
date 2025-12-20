@@ -43,7 +43,15 @@ export default function BranchSettingsPage() {
         message: ''
     })
     const [amenitiesSelected, setAmenitiesSelected] = useState<Record<string, boolean>>({})
-    const [operatingHours, setOperatingHours] = useState<Record<string, { open: string; close: string; closed: boolean }>>({})
+    const [operatingHours, setOperatingHours] = useState<Record<string, { open: string; close: string; closed: boolean }>>({
+        monday: { open: '', close: '', closed: false },
+        tuesday: { open: '', close: '', closed: false },
+        wednesday: { open: '', close: '', closed: false },
+        thursday: { open: '', close: '', closed: false },
+        friday: { open: '', close: '', closed: false },
+        saturday: { open: '', close: '', closed: false },
+        sunday: { open: '', close: '', closed: false }
+    })
 
     // Basic information form state
     const [basicInfo, setBasicInfo] = useState({
@@ -313,6 +321,7 @@ export default function BranchSettingsPage() {
         getBranchId()
     }, [router])
 
+
     // Load branch data when branchId is available
     useEffect(() => {
         if (!branchId) return
@@ -336,7 +345,28 @@ export default function BranchSettingsPage() {
 
                     // Load operating hours
                     if (data.operating_hours) {
-                        setOperatingHours(data.operating_hours)
+                        // Merge database data with default structure to ensure all days exist
+                        const mergedHours = {
+                            monday: data.operating_hours.monday || { open: '', close: '', closed: false },
+                            tuesday: data.operating_hours.tuesday || { open: '', close: '', closed: false },
+                            wednesday: data.operating_hours.wednesday || { open: '', close: '', closed: false },
+                            thursday: data.operating_hours.thursday || { open: '', close: '', closed: false },
+                            friday: data.operating_hours.friday || { open: '', close: '', closed: false },
+                            saturday: data.operating_hours.saturday || { open: '', close: '', closed: false },
+                            sunday: data.operating_hours.sunday || { open: '', close: '', closed: false }
+                        };
+                        setOperatingHours(mergedHours)
+                    } else {
+                        // Reset to default empty state
+                        setOperatingHours({
+                            monday: { open: '', close: '', closed: false },
+                            tuesday: { open: '', close: '', closed: false },
+                            wednesday: { open: '', close: '', closed: false },
+                            thursday: { open: '', close: '', closed: false },
+                            friday: { open: '', close: '', closed: false },
+                            saturday: { open: '', close: '', closed: false },
+                            sunday: { open: '', close: '', closed: false }
+                        })
                     }
 
                     // Load basic information
@@ -426,7 +456,6 @@ export default function BranchSettingsPage() {
 
         try {
             const formData = new FormData(event.currentTarget)
-
 
 
             const result = await saveBranchSettings(branchId, formData, uploadedImages)
