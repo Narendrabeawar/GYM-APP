@@ -28,11 +28,7 @@ const navigation = [
     { name: 'Dashboard', href: '/gym/dashboard', icon: LayoutDashboard },
     { name: 'Listed Branches', href: '/gym/listed-branches', icon: Building2 },
     { name: 'Operator', href: '/gym/operator', icon: Users },
-    { name: 'Trainers', href: '/gym/trainers', icon: UserCog },
     { name: 'Plans', href: '/gym/plans', icon: CreditCard },
-    { name: 'Attendance', href: '/gym/attendance', icon: Calendar },
-    { name: 'Payments', href: '/gym/payments', icon: IndianRupee },
-    { name: 'Settings', href: '/gym/settings', icon: Settings },
 ]
 
 export default function GymLayout({ children }: { children: React.ReactNode }) {

@@ -56,8 +56,12 @@ type Payment = {
     id: string
     member_id: string
     amount: number
+    payable_amount: number
+    discount_amount: number
+    due_amount: number
+    extra_amount: number
     payment_method: string
-    payment_type: string
+    extra_discount: string
     status: string
     description: string
     created_at: string
@@ -99,19 +103,22 @@ export default function ReceptionPaymentsPage() {
     const fetchPayments = useCallback(async () => {
         setIsLoading(true)
         try {
-            // Get user profile to get gym_id
+            // Get user profile to get gym_id and branch_id
             const { data: { user }, error: userError } = await supabase.auth.getUser()
             if (userError) throw userError
 
             let gymId = user?.user_metadata?.gym_id
-            if (!gymId) {
+            let branchId = user?.user_metadata?.branch_id
+
+            if (!gymId || !branchId) {
                 if (user?.id) {
                     const { data: profile } = await supabase
                         .from('profiles')
-                        .select('gym_id')
+                        .select('gym_id, branch_id')
                         .eq('id', user.id)
                         .single()
-                    gymId = profile?.gym_id
+                    gymId = gymId || profile?.gym_id
+                    branchId = branchId || profile?.branch_id
                 }
             }
 
@@ -120,15 +127,24 @@ export default function ReceptionPaymentsPage() {
                 return
             }
 
-            // Fetch payments with member details
-            const { data, error } = await supabase
+            if (!branchId) {
+                toast.error('No branch associated with your account')
+                return
+            }
+
+            // Fetch payments with member details - filtered by both gym_id AND branch_id
+            let query = supabase
                 .from('payments')
                 .select(`
                     id,
                     member_id,
                     amount,
+                    payable_amount,
+                    discount_amount,
+                    due_amount,
+                    extra_amount,
                     payment_method,
-                    payment_type,
+                    extra_discount,
                     status,
                     description,
                     created_at,
@@ -141,7 +157,10 @@ export default function ReceptionPaymentsPage() {
                     )
                 `)
                 .eq('gym_id', gymId)
+                .eq('branch_id', branchId)
                 .order('created_at', { ascending: false })
+
+            const { data, error } = await query
 
             if (error) throw error
 
@@ -340,7 +359,7 @@ export default function ReceptionPaymentsPage() {
                         </div>
                         <div>
                             <p style="font-size: 12px; font-weight: 600; color: #6b7280; margin: 0;">PAYMENT TYPE</p>
-                            <p style="font-size: 16px; font-weight: 500; color: #111827; margin: 5px 0;">${payment.payment_type.replace('_', ' ').charAt(0).toUpperCase() + payment.payment_type.replace('_', ' ').slice(1)}</p>
+                            <p style="font-size: 16px; font-weight: 500; color: #111827; margin: 5px 0;">${payment.extra_discount.replace('_', ' ').charAt(0).toUpperCase() + payment.extra_discount.replace('_', ' ').slice(1)}</p>
                         </div>
                         <div>
                             <p style="font-size: 12px; font-weight: 600; color: #6b7280; margin: 0;">DATE & TIME</p>
@@ -508,7 +527,7 @@ export default function ReceptionPaymentsPage() {
                                 </div>
                                 <div class="info-item">
                                     <div class="info-label">Payment Type</div>
-                                    <div class="info-value">${payment.payment_type.replace('_', ' ').charAt(0).toUpperCase() + payment.payment_type.replace('_', ' ').slice(1)}</div>
+                                    <div class="info-value">${payment.extra_discount.replace('_', ' ').charAt(0).toUpperCase() + payment.extra_discount.replace('_', ' ').slice(1)}</div>
                                 </div>
                                 <div class="info-item">
                                     <div class="info-label">Date & Time</div>
@@ -567,7 +586,7 @@ Valid Till: ${validTill}
 
 Payment Information:
 Method: ${payment.payment_method.charAt(0).toUpperCase() + payment.payment_method.slice(1)}
-Type: ${payment.payment_type.replace('_', ' ').charAt(0).toUpperCase() + payment.payment_type.replace('_', ' ').slice(1)}
+Type: ${payment.extra_discount.replace('_', ' ').charAt(0).toUpperCase() + payment.extra_discount.replace('_', ' ').slice(1)}
 Date: ${paymentDate}
 Status: ${payment.status.charAt(0).toUpperCase() + payment.status.slice(1)}
 
@@ -639,7 +658,7 @@ Generated on: ${formatDateTime(new Date())}`
         },
         {
             accessorKey: 'amount',
-            header: 'Amount',
+            header: 'Amount Received',
             size: 120,
             cell: ({ row }) => (
                 <div className="flex items-center gap-2 text-stone-900 font-bold">
@@ -649,58 +668,34 @@ Generated on: ${formatDateTime(new Date())}`
             ),
         },
         {
-            accessorKey: 'payment_method',
-            header: 'Method',
+            accessorKey: 'due_amount',
+            header: 'Due Amount',
             size: 120,
             cell: ({ row }) => {
-                const method = row.getValue('payment_method') as string
+                const dueAmount = row.getValue('due_amount') as number || 0
                 return (
                     <div className="flex items-center gap-2">
-                        <span className="text-lg">{getPaymentMethodIcon(method)}</span>
-                        <span className="font-medium text-stone-700 capitalize">{method}</span>
+                        <IndianRupee className="w-4 h-4 text-red-600" />
+                        <span className={`font-bold ${dueAmount > 0 ? 'text-red-700' : 'text-stone-500'}`}>
+                            {dueAmount > 0 ? dueAmount : '0'}
+                        </span>
                     </div>
                 )
             },
         },
+        // Advance Amount column removed as per request
         {
-            accessorKey: 'payment_type',
-            header: 'Type',
+            accessorKey: 'extra_discount',
+            header: 'Extra Discount',
             size: 120,
             cell: ({ row }) => {
-                const type = row.getValue('payment_type') as string
-                return (
-                    <Badge
-                        variant="outline"
-                        className="capitalize font-bold rounded-lg border-2 border-purple-200 bg-purple-50 text-purple-800"
-                    >
-                        {type.replace('_', ' ')}
-                    </Badge>
-                )
-            },
-        },
-        {
-            accessorKey: 'status',
-            header: 'Status',
-            size: 120,
-            cell: ({ row }) => {
-                const status = row.getValue('status') as string
+                const extraDiscount = row.getValue('extra_discount') as number || 0
                 return (
                     <div className="flex items-center gap-2">
-                        {getStatusIcon(status)}
-                        <Badge
-                            variant="outline"
-                            className={`capitalize font-bold rounded-lg border-2 ${
-                                status === 'completed'
-                                    ? 'border-green-200 bg-green-50 text-green-800'
-                                    : status === 'pending'
-                                    ? 'border-yellow-200 bg-yellow-50 text-yellow-800'
-                                    : status === 'failed'
-                                    ? 'border-red-200 bg-red-50 text-red-800'
-                                    : 'border-blue-200 bg-blue-50 text-blue-800'
-                            }`}
-                        >
-                            {status}
-                        </Badge>
+                        <IndianRupee className="w-4 h-4 text-amber-600" />
+                        <span className={`font-bold ${extraDiscount > 0 ? 'text-amber-700' : 'text-stone-500'}`}>
+                            {extraDiscount > 0 ? extraDiscount : '0'}
+                        </span>
                     </div>
                 )
             },
@@ -885,7 +880,7 @@ Generated on: ${formatDateTime(new Date())}`
                                     <div className="space-y-2">
                                         <Label className="text-sm font-semibold text-gray-700">Payment Type</Label>
                                         <Badge variant="outline" className="capitalize font-bold rounded-lg border-2 border-purple-200 bg-purple-50 text-purple-800">
-                                            {selectedPayment.payment_type.replace('_', ' ')}
+                                            {selectedPayment.extra_discount.replace('_', ' ')}
                                         </Badge>
                                     </div>
                                 </div>

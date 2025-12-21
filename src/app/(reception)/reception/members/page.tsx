@@ -25,6 +25,15 @@ import { Badge } from '@/components/ui/badge'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import {
+    AlertDialog,
+    AlertDialogContent,
+    AlertDialogHeader,
+    AlertDialogTitle,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogAction,
+} from '@/components/ui/alert-dialog'
+import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
@@ -66,16 +75,19 @@ export default function MembersDirectoryPage() {
     const [mounted, setMounted] = useState(false)
     const [searchQuery, setSearchQuery] = useState('')
     const [activeTab, setActiveTab] = useState<'active' | 'expired' | 'expiring-soon'>('active')
-    const [membershipPlans, setMembershipPlans] = useState<{id: string, name: string, duration_months: number, price?: number}[]>([])
+    const [membershipPlans, setMembershipPlans] = useState<{id: string, name: string, duration_months: number, price?: number, discount_amount?: number}[]>([])
     const [showRenewalModal, setShowRenewalModal] = useState(false)
     const [showViewModal, setShowViewModal] = useState(false)
     const [showEditModal, setShowEditModal] = useState(false)
     const [selectedMember, setSelectedMember] = useState<Member | null>(null)
     const [selectedPlan, setSelectedPlan] = useState('')
     const [amountReceived, setAmountReceived] = useState('')
+    const [differenceAction, setDifferenceAction] = useState('')
     const [isRenewing, setIsRenewing] = useState(false)
     const [isExtension, setIsExtension] = useState(false)
     const [isActiveMemberExtension, setIsActiveMemberExtension] = useState(false)
+    const [alertOpen, setAlertOpen] = useState(false)
+    const [alertMsg, setAlertMsg] = useState('')
     // Edit form states
     const [editForm, setEditForm] = useState({
         full_name: '',
@@ -136,7 +148,7 @@ export default function MembersDirectoryPage() {
 
     const fetchMembershipPlans = useCallback(async (gymId?: string) => {
         try {
-            let query = supabase.from('membership_plans').select('id, name, duration_months, price').eq('status', 'active')
+            let query = supabase.from('membership_plans').select('id, name, duration_months, price, discount_amount').eq('status', 'active')
             if (gymId) {
                 query = query.eq('gym_id', gymId)
             } else {
@@ -293,15 +305,85 @@ export default function MembersDirectoryPage() {
                 paymentDescription = `Membership extension for ${selectedMembershipPlan.name} (remaining days added)`
             }
 
+            const basePrice = selectedMembershipPlan.price || 0
+            const planDiscountAmount = selectedMembershipPlan.discount_amount || 0
+            const finalPayableAmount = Math.max(0, basePrice - planDiscountAmount)
+            const receivedAmount = parseFloat(amountReceived || '0')
+
+            if (receivedAmount > finalPayableAmount) {
+                setAlertMsg('Amount cannot exceed final payable amount')
+                setAlertOpen(true)
+                setIsRenewing(false)
+                return
+            }
+
+            let paymentStatus: 'completed' | 'pending' = 'completed'
+            const difference = Number((receivedAmount - finalPayableAmount).toFixed(2))
+
+            let discountApplied = 0
+            let dueAmount = 0
+            let extraAmount = 0
+
+            if (difference < 0) {
+                const remaining = Math.abs(difference)
+                if (!differenceAction) {
+                    toast.error('Select how to handle the remaining amount.')
+                    return
+                }
+
+                if (differenceAction === 'discount') {
+                    paymentDescription += ` | Additional discount ₹${remaining}`
+                    discountApplied = remaining
+                } else if (differenceAction === 'due') {
+                    paymentStatus = 'pending'
+                    paymentDescription += ` | Amount due ₹${remaining}`
+                    dueAmount = remaining
+                }
+            } else if (difference > 0) {
+                const extra = difference
+                if (!differenceAction) {
+                    toast.error('Select how to handle the extra amount.')
+                    return
+                }
+
+                if (differenceAction === 'extra_keep') {
+                    paymentDescription += ` | Extra received ₹${extra}`
+                    extraAmount = extra
+                } else if (differenceAction === 'extra_adjust') {
+                    paymentDescription += ` | Adjusted with extra ₹${extra}`
+                    extraAmount = extra
+                }
+            }
+
+            // Get profile to ensure branch_id and gym_id
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('gym_id, branch_id')
+                .eq('id', user.id)
+                .single()
+
+            if (!profile?.gym_id) {
+                toast.error('No gym associated with your account.')
+                return
+            }
+
+            // Store only numeric value for extra_discount (or 0 if none)
+            const extraDiscountValue = discountApplied > 0 ? discountApplied : 0
+
             const { error: paymentError } = await supabase
                 .from('payments')
                 .insert({
-                    gym_id: user.user_metadata?.gym_id,
+                    gym_id: profile.gym_id,
+                    branch_id: profile.branch_id || null,
                     member_id: selectedMember.id,
-                    amount: parseFloat(amountReceived),
+                    amount: receivedAmount,
+                    payable_amount: finalPayableAmount,
+                    discount_amount: planDiscountAmount,
+                    due_amount: dueAmount,
+                    extra_amount: extraAmount,
                     payment_method: 'cash',
-                    payment_type: 'membership',
-                    status: 'completed',
+                    extra_discount: extraDiscountValue,
+                    status: paymentStatus,
                     description: paymentDescription,
                 })
 
@@ -329,6 +411,7 @@ export default function MembersDirectoryPage() {
             setSelectedMember(null)
             setSelectedPlan('')
             setAmountReceived('')
+            setDifferenceAction('')
             setIsExtension(false)
             setIsActiveMemberExtension(false)
 
@@ -986,7 +1069,22 @@ ${gymName}`
                             <select
                                 id="renewalPlan"
                                 value={selectedPlan}
-                                onChange={(e) => setSelectedPlan(e.target.value)}
+                                onChange={(e) => {
+                                    const planId = e.target.value
+                                    setSelectedPlan(planId)
+                                    // Auto-fill amount received with final payable amount
+                                    if (planId) {
+                                        const plan = membershipPlans.find(p => p.id === planId)
+                                        if (plan) {
+                                            const discount = plan.discount_amount || 0
+                                            const basePrice = plan.price || 0
+                                            const finalAmount = Math.max(0, basePrice - discount)
+                                            setAmountReceived(finalAmount.toString())
+                                        }
+                                    } else {
+                                        setAmountReceived('')
+                                    }
+                                }}
                                 className="w-full h-11 rounded-xl border border-stone-200 px-3 bg-white focus:border-emerald-500 focus:ring-emerald-500"
                                 required
                             >
@@ -998,6 +1096,32 @@ ${gymName}`
                                 ))}
                             </select>
                         </div>
+                        {selectedPlan && (() => {
+                            const plan = membershipPlans.find(p => p.id === selectedPlan)
+                            if (!plan) return null
+                            const discount = plan.discount_amount || 0
+                            const basePrice = plan.price || 0
+                            const finalAmount = Math.max(0, basePrice - discount)
+                            
+                            return (
+                                <>
+                                    {discount > 0 && (
+                                        <div className="grid gap-2">
+                                            <Label className="text-stone-700 font-medium">Discount</Label>
+                                            <div className="h-11 rounded-xl border border-stone-200 px-3 bg-stone-50 flex items-center">
+                                                <span className="text-stone-900 font-semibold">₹{discount.toFixed(2)}</span>
+                                            </div>
+                                        </div>
+                                    )}
+                                    <div className="grid gap-2">
+                                        <Label className="text-stone-700 font-medium">Final Payable Amount</Label>
+                                        <div className="h-11 rounded-xl px-3 bg-emerald-50 border border-emerald-200 flex items-center">
+                                            <span className="text-emerald-800 font-bold text-lg">₹{finalAmount.toFixed(2)}</span>
+                                        </div>
+                                    </div>
+                                </>
+                            )
+                        })()}
                         <div className="grid gap-2">
                             <Label htmlFor="renewalAmount" className="text-stone-700 font-medium">Amount Received</Label>
                             <Input
@@ -1005,23 +1129,89 @@ ${gymName}`
                                 type="number"
                                 placeholder="Enter amount received"
                                 value={amountReceived}
-                                onChange={(e) => setAmountReceived(e.target.value)}
+                                onChange={(e) => {
+                                    const raw = e.target.value
+                                    const entered = parseFloat(raw || '0')
+                                    if (Number.isNaN(entered)) {
+                                        setAmountReceived('')
+                                        return
+                                    }
+                                    const plan = membershipPlans.find(p => p.id === selectedPlan)
+                                    const basePrice = plan?.price || 0
+                                    const discount = plan?.discount_amount || 0
+                                    const finalAmount = Math.max(0, basePrice - discount)
+                                    if (entered > finalAmount) {
+                                        setAlertMsg('Amount cannot exceed final payable amount')
+                                        setAlertOpen(true)
+                                        setAmountReceived(finalAmount.toString())
+                                        return
+                                    }
+                                    if (entered < 0) {
+                                        setAmountReceived('0')
+                                        return
+                                    }
+                                    setAmountReceived(raw)
+                                }}
                                 required
                                 className="h-11 rounded-xl border-stone-200 focus:border-emerald-500 focus:ring-emerald-500"
                             />
                         </div>
+                        {selectedPlan && amountReceived && (() => {
+                            const plan = membershipPlans.find(p => p.id === selectedPlan)
+                            if (!plan) return null
+                            
+                            const basePrice = plan.price || 0
+                            const discount = plan.discount_amount || 0
+                            const finalAmount = Math.max(0, basePrice - discount)
+                            const receivedAmount = parseFloat(amountReceived || '0')
+                            const difference = receivedAmount - finalAmount
+                            
+                            if (Math.abs(difference) < 0.01) return null
+                            
+                            return (
+                                <div className="grid gap-2">
+                                    <Label className="text-stone-700 font-medium">
+                                        {difference < 0 ? 'Remaining Amount' : 'Extra Amount'} (₹{Math.abs(difference).toFixed(2)})
+                                    </Label>
+                                    <select
+                                        value={differenceAction}
+                                        onChange={(e) => setDifferenceAction(e.target.value)}
+                                        className="w-full h-11 rounded-xl border border-stone-200 px-3 bg-white focus:border-emerald-500 focus:ring-emerald-500"
+                                        required
+                                    >
+                                        <option value="">Select how to handle</option>
+                                        {difference < 0 ? (
+                                            <>
+                                                <option value="discount">Treat remaining as additional discount</option>
+                                                <option value="due">Mark remaining as amount due (to be paid later)</option>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <option value="extra_keep">Keep extra as received</option>
+                                                <option value="extra_adjust">Adjust/credit extra amount</option>
+                                            </>
+                                        )}
+                                    </select>
+                                </div>
+                            )
+                        })()}
                         <DialogFooter className="flex justify-end gap-3 pt-4">
                             <Button
                                 type="button"
                                 variant="outline"
-                                onClick={() => setShowRenewalModal(false)}
+                                onClick={() => {
+                                    setShowRenewalModal(false)
+                                    setSelectedPlan('')
+                                    setAmountReceived('')
+                                    setDifferenceAction('')
+                                }}
                                 className="border-stone-200 text-stone-700 hover:bg-stone-50"
                             >
                                 Cancel
                             </Button>
                             <Button
                                 type="submit"
-                                disabled={isRenewing}
+                                disabled={isRenewing || alertOpen}
                                 className="bg-gradient-to-r from-emerald-800 to-teal-800 hover:from-emerald-900 hover:to-teal-900 text-white shadow-lg"
                             >
                                 {isRenewing ? (isExtension ? 'Extending...' : 'Renewing...') : (isExtension ? 'Extend Membership' : 'Renew Membership')}
@@ -1030,6 +1220,18 @@ ${gymName}`
                     </form>
                 </DialogContent>
             </Dialog>
+            {/* Amount Alert Dialog */}
+            <AlertDialog open={alertOpen} onOpenChange={setAlertOpen}>
+                <AlertDialogContent className="bg-white rounded-xl border-green-200">
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Invalid Amount</AlertDialogTitle>
+                        <AlertDialogDescription>{alertMsg}</AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogAction onClick={() => setAlertOpen(false)}>OK</AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
 
             {/* View Profile Modal - Using Reusable Component */}
             <MemberProfileModal 

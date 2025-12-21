@@ -112,6 +112,12 @@ ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS manager_name TEXT;
 ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS certifications TEXT;
 ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS nearby_landmarks TEXT;
 
+-- Ensure membership_plans table has new columns (safe to run multiple times)
+ALTER TABLE public.membership_plans ADD COLUMN IF NOT EXISTS discount_amount DECIMAL(10,2) DEFAULT 0;
+ALTER TABLE public.membership_plans ADD COLUMN IF NOT EXISTS final_amount DECIMAL(10,2);
+ALTER TABLE public.membership_plans ADD COLUMN IF NOT EXISTS custom_days INTEGER;
+ALTER TABLE public.membership_plans ADD COLUMN IF NOT EXISTS plan_period TEXT CHECK (plan_period IN ('monthly', 'quarterly', 'half-yearly', 'yearly', 'custom')) DEFAULT 'monthly';
+
 -- 3. MEMBERSHIP PLANS
 CREATE TABLE IF NOT EXISTS public.membership_plans (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
@@ -120,6 +126,10 @@ CREATE TABLE IF NOT EXISTS public.membership_plans (
     description TEXT,
     duration_months INTEGER NOT NULL,
     price DECIMAL(10,2) NOT NULL,
+    discount_amount DECIMAL(10,2) DEFAULT 0,
+    final_amount DECIMAL(10,2),
+    custom_days INTEGER,
+    plan_period TEXT CHECK (plan_period IN ('monthly', 'quarterly', 'half-yearly', 'yearly', 'custom')) DEFAULT 'monthly',
     features TEXT[],
     status TEXT CHECK (status IN ('active', 'inactive')) DEFAULT 'active',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
@@ -214,8 +224,12 @@ CREATE TABLE IF NOT EXISTS public.payments (
     gym_id UUID REFERENCES public.gyms(id) ON DELETE CASCADE,
     member_id UUID REFERENCES public.members(id) ON DELETE SET NULL,
     amount DECIMAL(10,2) NOT NULL,
+    payable_amount DECIMAL(10,2),
+    discount_amount DECIMAL(10,2) DEFAULT 0,
+    due_amount DECIMAL(10,2) DEFAULT 0,
+    extra_amount DECIMAL(10,2) DEFAULT 0,
     payment_method TEXT CHECK (payment_method IN ('cash', 'card', 'upi', 'bank_transfer')),
-    payment_type TEXT CHECK (payment_type IN ('membership', 'personal_training', 'other')),
+    extra_discount DECIMAL(10,2) DEFAULT 0,
     status TEXT CHECK (status IN ('pending', 'completed', 'failed', 'refunded')) DEFAULT 'completed',
     transaction_id TEXT,
     description TEXT,

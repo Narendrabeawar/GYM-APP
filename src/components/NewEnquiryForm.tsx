@@ -10,34 +10,20 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { DataTable } from '@/components/ui/data-table'
 import { ColumnDef } from '@tanstack/react-table'
+import { Dialog, DialogContent, DialogFooter, DialogTitle } from '@/components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    DialogTrigger,
-} from '@/components/ui/dialog'
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from '@/components/ui/select'
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuLabel,
-    DropdownMenuSeparator,
-    DropdownMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { MoreHorizontal } from 'lucide-react'
-import { User, Heart, Phone, FileText, Plus, Calendar, MapPin, Phone as PhoneIcon, CalendarDays, BadgeDollarSign } from 'lucide-react'
+import { User, Heart, Phone, FileText, Plus, Calendar, MapPin, Phone as PhoneIcon, CalendarDays, BadgeDollarSign, MoreHorizontal } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
+import { ConvertToMemberModal } from '@/components/ConvertToMemberModal'
 
 interface EnquiryFormData {
   full_name: string
@@ -83,6 +69,10 @@ interface MembershipPlan {
   name: string
   duration_months: number
   price: number
+  discount_amount?: number
+  final_amount?: number
+  custom_days?: number
+  plan_period?: string
 }
 
 export default function NewEnquiryForm() {
@@ -101,7 +91,52 @@ export default function NewEnquiryForm() {
   const [selectedEnquiry, setSelectedEnquiry] = useState<Enquiry | null>(null)
   const [selectedPlan, setSelectedPlan] = useState<string>('')
   const [amountReceived, setAmountReceived] = useState<string>('')
+  const [differenceAction, setDifferenceAction] = useState<string>('')
   const [showViewModal, setShowViewModal] = useState(false)
+
+  const selectedPlanDetails = useMemo(() => {
+    const plansSource = membershipPlans.length ? membershipPlans : defaultPlans
+    const plan = plansSource.find((p) => p.id === selectedPlan)
+    if (!plan) return null
+
+    const basePrice = plan.price || 0
+    const discount = plan.discount_amount ?? 0
+    const finalAmount = plan.final_amount ?? Math.max(0, basePrice - discount)
+
+    return {
+      plan,
+      basePrice,
+      discount,
+      finalAmount
+    }
+  }, [membershipPlans, selectedPlan])
+
+  const amountDifference = useMemo(() => {
+    if (!selectedPlanDetails) return 0
+    const received = parseFloat(amountReceived || '0')
+    if (Number.isNaN(received)) return 0
+    return Number((received - selectedPlanDetails.finalAmount).toFixed(2))
+  }, [selectedPlanDetails, amountReceived])
+
+  const hasDifference = useMemo(() => {
+    if (!selectedPlanDetails) return false
+    if (amountReceived === '') return false
+    return Math.abs(amountDifference) > 0.009
+  }, [selectedPlanDetails, amountDifference, amountReceived])
+
+  const formatCurrency = (value: number) => `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 0 })}`
+
+  useEffect(() => {
+    // Autofill Amount Received to Final Payable when plan changes
+    if (selectedPlanDetails) {
+      setAmountReceived(String(selectedPlanDetails.finalAmount ?? ''))
+    }
+  }, [selectedPlan])
+
+  useEffect(() => {
+    // Reset difference choice whenever plan or entered amount changes
+    setDifferenceAction('')
+  }, [selectedPlan, amountReceived])
 
   const handleConvertClick = (enquiry: Enquiry) => {
     setSelectedEnquiry(enquiry)
@@ -338,13 +373,21 @@ export default function NewEnquiryForm() {
 
       console.log('Gym ID found:', profile.gym_id)
 
-      // Fetch enquiries (exclude converted entries so they don't show after conversion)
-      const { data, error } = await supabase
+      // Fetch enquiries (exclude converted entries and filter by branch_id)
+      let query = supabase
         .from('enquiries')
         .select('*')
         .eq('gym_id', profile.gym_id)
         .neq('status', 'converted')
         .order('created_at', { ascending: false })
+
+      // Add branch filter if branch_id exists
+      if (profile.branch_id) {
+        query = query.eq('branch_id', profile.branch_id)
+        console.log('Branch filter applied:', profile.branch_id)
+      }
+
+      const { data, error } = await query
 
       if (error) {
         console.error('Database query error:', error)
@@ -383,7 +426,7 @@ export default function NewEnquiryForm() {
 
       const { data, error } = await supabase
         .from('membership_plans')
-        .select('id, name, duration_months, price')
+        .select('id, name, duration_months, price, discount_amount, final_amount, custom_days, plan_period')
         .eq('gym_id', profile.gym_id)
         .order('duration_months', { ascending: true })
 
@@ -487,6 +530,10 @@ export default function NewEnquiryForm() {
         email: '',
         address: '',
         health_info: '',
+        blood_group: '',
+        height: '',
+        weight: '',
+        fitness_goal: '',
         emergency_contact_name: '',
         emergency_contact_phone: '',
         emergency_contact_relationship: '',
@@ -544,6 +591,60 @@ export default function NewEnquiryForm() {
         toast.error('Selected membership plan not found.')
         setIsLoading(false)
         return
+      }
+
+      const basePrice = selectedMembershipPlan.price || 0
+      const discountAmount = selectedMembershipPlan.discount_amount ?? 0
+      const finalPayableAmount = selectedMembershipPlan.final_amount ?? Math.max(0, basePrice - discountAmount)
+      const receivedAmount = parseFloat(amountReceived || '0')
+
+      if (receivedAmount > finalPayableAmount) {
+        toast.error('Amount cannot exceed final payable amount')
+        setIsLoading(false)
+        return
+      }
+
+      let paymentStatus: 'completed' | 'pending' = 'completed'
+      let paymentDescription = `Membership payment for ${selectedMembershipPlan.name}`
+      const difference = Number((receivedAmount - finalPayableAmount).toFixed(2))
+
+      // Track how we store details
+      let payableAmount = finalPayableAmount
+      let discountApplied = 0
+      let dueAmount = 0
+      let extraAmount = 0
+
+      if (difference < 0) {
+        const remaining = Math.abs(difference)
+        if (!differenceAction) {
+          toast.error('Select how to handle the remaining amount.')
+          setIsLoading(false)
+          return
+        }
+
+        if (differenceAction === 'discount') {
+          paymentDescription += ` | Additional discount ₹${remaining}`
+          discountApplied = remaining
+        } else if (differenceAction === 'due') {
+          paymentStatus = 'pending'
+          paymentDescription += ` | Amount due ₹${remaining}`
+          dueAmount = remaining
+        }
+      } else if (difference > 0) {
+        const extra = difference
+        if (!differenceAction) {
+          toast.error('Select how to handle the extra amount.')
+          setIsLoading(false)
+          return
+        }
+
+        if (differenceAction === 'extra_keep') {
+          paymentDescription += ` | Extra received ₹${extra}`
+          extraAmount = extra
+        } else if (differenceAction === 'extra_adjust') {
+          paymentDescription += ` | Adjusted with extra ₹${extra}`
+          extraAmount = extra
+        }
       }
 
       const membershipStartDate = new Date()
@@ -698,7 +799,7 @@ export default function NewEnquiryForm() {
 
       // 3. Record payment (optional, but good practice) — non-blocking
       try {
-        const paymentAmount = parseFloat(amountReceived || '0')
+        const paymentAmount = receivedAmount
         if (isNaN(paymentAmount) || paymentAmount <= 0) {
           console.warn('Invalid payment amount, skipping payment record:', amountReceived)
         } else {
@@ -707,10 +808,14 @@ export default function NewEnquiryForm() {
             branch_id: profile.branch_id || null, // Include branch_id if available
             member_id: newMember.id,
             amount: paymentAmount,
+            payable_amount: payableAmount,
+            discount_amount: 0, // Plan discount (none for enquiry conversion)
+            due_amount: dueAmount,
+            extra_amount: extraAmount,
             payment_method: 'cash',
-            payment_type: 'membership',
-            status: 'completed',
-            description: `Membership payment for ${selectedMembershipPlan.name}`,
+            extra_discount: discountApplied, // Additional discount given by user
+            status: paymentStatus,
+            description: paymentDescription,
           }
 
           console.log('Attempting to insert payment:', paymentData)
@@ -1103,66 +1208,30 @@ export default function NewEnquiryForm() {
         )}
       </AnimatePresence>
 
-      {/* Convert to Member Modal */}
-      <Dialog open={showConvertModal} onOpenChange={setShowConvertModal}>
-        <DialogContent className="sm:max-w-[425px] bg-white rounded-2xl border-none shadow-2xl p-6">
-          <DialogHeader>
-            <DialogTitle className="text-2xl font-bold bg-gradient-to-r from-emerald-800 to-teal-800 bg-clip-text text-transparent">
-              Convert to Member
-            </DialogTitle>
-            <DialogDescription className="text-stone-500">
-              Enter membership details for {selectedEnquiry?.full_name}.
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleConvertSubmit} className="grid gap-6 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="membershipPlan" className="text-stone-700 font-medium">Membership Plan</Label>
-              <select
-                id="membershipPlan"
-                value={selectedPlan}
-                onChange={(e) => setSelectedPlan(e.target.value)}
-                className="w-full h-11 rounded-xl border border-stone-200 px-3 bg-white focus:border-emerald-500 focus:ring-emerald-500"
-              >
-                <option value="">{(membershipPlans.length === 0 ? 'Select a plan' : 'Select a plan')}</option>
-                {(membershipPlans.length ? membershipPlans : defaultPlans).map((plan) => (
-                  <option key={plan.id} value={plan.id}>
-                    {plan.name} ({plan.duration_months} months){plan.price ? ` - ₹${plan.price}` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="amountReceived" className="text-stone-700 font-medium">Amount Received</Label>
-              <Input
-                id="amountReceived"
-                type="number"
-                placeholder="Enter amount received"
-                value={amountReceived}
-                onChange={(e) => setAmountReceived(e.target.value)}
-                required
-                className="h-11 rounded-xl border-stone-200 focus:border-emerald-500 focus:ring-emerald-500"
-              />
-            </div>
-            <DialogFooter className="flex justify-end gap-3 pt-4">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setShowConvertModal(false)}
-                className="border-stone-200 text-stone-700 hover:bg-stone-50"
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={isLoading}
-                className="bg-gradient-to-r from-emerald-800 to-teal-800 hover:from-emerald-900 hover:to-teal-900 text-white shadow-lg"
-              >
-                {isLoading ? 'Converting...' : 'Convert'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <ConvertToMemberModal
+        open={showConvertModal}
+        onOpenChange={setShowConvertModal}
+        enquiry={selectedEnquiry}
+        membershipPlans={membershipPlans}
+        defaultPlans={defaultPlans}
+        selectedPlan={selectedPlan}
+        onPlanChange={setSelectedPlan}
+        amountReceived={amountReceived}
+        onAmountReceivedChange={setAmountReceived}
+        differenceAction={differenceAction}
+        onDifferenceActionChange={setDifferenceAction}
+        selectedPlanDetails={selectedPlanDetails ? {
+          plan: selectedPlanDetails.plan,
+          basePrice: selectedPlanDetails.basePrice,
+          discount: selectedPlanDetails.discount,
+          finalAmount: selectedPlanDetails.finalAmount,
+        } : null}
+        hasDifference={hasDifference}
+        amountDifference={amountDifference}
+        formatCurrency={formatCurrency}
+        isLoading={isLoading}
+        onSubmit={handleConvertSubmit}
+      />
     {/* View Details Modal */}
     <Dialog open={showViewModal} onOpenChange={setShowViewModal}>
       <DialogContent className="sm:max-w-[640px] w-full rounded-2xl shadow-lg overflow-hidden border-0 ring-0">
