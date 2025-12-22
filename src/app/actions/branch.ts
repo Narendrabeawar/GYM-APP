@@ -404,6 +404,7 @@ export interface BranchDashboardData {
         total_expenses: number
         net_profit: number
         monthly_revenue: number
+        year_revenue: number
     }
     members: {
         total_members: number
@@ -455,6 +456,7 @@ export async function getBranchDashboardData(branchId: string): Promise<BranchDa
         let total_income = 0
         let total_expenses = 0
         let monthly_revenue = 0
+        let year_revenue = 0
 
         if (!pnlError && pnlData) {
             const normalizedData = (pnlData as any[]).map((r: any) => ({
@@ -592,13 +594,97 @@ export async function getBranchDashboardData(branchId: string): Promise<BranchDa
             console.error('Unexpected error fetching today PnL:', err)
         }
 
+        // Calculate precise monthly_revenue from payments and transactions for current month
+        try {
+            const now = new Date()
+            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+            const { data: paymentsMonth, error: paymentsMonthError } = await supabase
+                .from('payments')
+                .select('amount, status, created_at')
+                .eq('branch_id', branchId)
+                .gte('created_at', startOfMonth.toISOString())
+
+            let monthRev = 0
+            if (!paymentsMonthError && paymentsMonth) {
+                // Sum all payments' amount in the current month regardless of status (completed/pending)
+                monthRev += (paymentsMonth as any[]).reduce((s, p) => s + Number(p.amount || 0), 0)
+            } else if (paymentsMonthError) {
+                console.error('Error fetching month payments:', paymentsMonthError)
+            }
+            // include transaction incomes in month if transactions table exists
+            try {
+                const { data: transMonth, error: transMonthError } = await supabase
+                    .from('transactions')
+                    .select('amount, type, status, created_at')
+                    .eq('branch_id', branchId)
+                    .gte('created_at', startOfMonth.toISOString())
+                if (!transMonthError && transMonth) {
+                    monthRev += (transMonth as any[]).reduce((s, t) => {
+                        if (t.type === 'income' && (!t.status || t.status === 'completed')) return s + Number(t.amount || 0)
+                        return s
+                    }, 0)
+                } else if (transMonthError) {
+                    console.error('Error fetching month transactions:', transMonthError)
+                }
+            } catch (e) {
+                console.error('Transactions query failed:', e)
+            }
+
+            monthly_revenue = Math.round(monthRev)
+        } catch (e) {
+            console.error('Error computing monthly_revenue:', e)
+        }
+
+        // Calculate year-to-date revenue (current year) from payments and transactions
+        try {
+            const now = new Date()
+            const startOfYear = new Date(now.getFullYear(), 0, 1)
+            const { data: paymentsYtd, error: paymentsYtdError } = await supabase
+                .from('payments')
+                .select('amount, status, created_at')
+                .eq('branch_id', branchId)
+                .gte('created_at', startOfYear.toISOString())
+
+            let ytdRev = 0
+            if (!paymentsYtdError && paymentsYtd) {
+                // include all payments amounts regardless of status as requested
+                ytdRev += (paymentsYtd as any[]).reduce((s, p) => s + Number(p.amount || 0), 0)
+            } else if (paymentsYtdError) {
+                console.error('Error fetching YTD payments:', paymentsYtdError)
+            }
+
+            // include transactions incomes if transactions table exists
+            try {
+                const { data: transYtd, error: transYtdError } = await supabase
+                    .from('transactions')
+                    .select('amount, type, status, created_at')
+                    .eq('branch_id', branchId)
+                    .gte('created_at', startOfYear.toISOString())
+                if (!transYtdError && transYtd) {
+                    ytdRev += (transYtd as any[]).reduce((s, t) => {
+                        if (t.type === 'income' && (!t.status || t.status === 'completed')) return s + Number(t.amount || 0)
+                        return s
+                    }, 0)
+                } else if (transYtdError) {
+                    console.error('Error fetching YTD transactions:', transYtdError)
+                }
+            } catch (e) {
+                console.error('Transactions YTD query failed:', e)
+            }
+
+            year_revenue = Math.round(ytdRev)
+        } catch (e) {
+            console.error('Error computing year_revenue:', e)
+        }
+
         return {
             branch,
             financials: {
                 total_income,
                 total_expenses,
                 net_profit,
-                monthly_revenue
+                monthly_revenue,
+                year_revenue
             },
             members: {
                 total_members,

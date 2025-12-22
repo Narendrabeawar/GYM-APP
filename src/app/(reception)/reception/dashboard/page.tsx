@@ -128,12 +128,7 @@ export default function ReceptionDashboardPage() {
                 />
             </div>
 
-            <div className="text-center pt-6">
-                <div className="inline-block px-6 py-3 rounded-full bg-linear-to-r from-emerald-700 to-teal-600 text-white shadow-lg">
-                    Dashboard Coming Soon
-                </div>
-                <p className="text-stone-500 mt-3">More insights and widgets are on the way.</p>
-            </div>
+            {/* Placeholder banner removed per request */}
         </div>
     )
 }

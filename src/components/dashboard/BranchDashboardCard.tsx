@@ -65,7 +65,7 @@ export function BranchDashboardCard({
                                     >
                                         {change}
                                     </span>
-                                    <span className="text-xs text-stone-500">vs last month</span>
+                                    {/* removed 'vs last month' per UI request */}
                                 </div>
                             )}
                         </div>

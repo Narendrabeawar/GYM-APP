@@ -258,7 +258,16 @@ export async function getGymDashboardData(gymId: string): Promise<{
             total_profit: branchData.reduce((sum, b) => sum + b.net_profit, 0),
             // use allMembers for gym-wide totals (includes unassigned members)
             total_members: (allMembers && Array.isArray(allMembers)) ? allMembers.length : branchData.reduce((sum, b) => sum + b.member_count, 0),
-            active_members: (allMembers && Array.isArray(allMembers)) ? (allMembers as any[]).filter(m => m.membership_status === 'active' || m.membership_status === 'pending').length : branchData.reduce((sum, b) => sum + b.active_members, 0)
+            active_members: (allMembers && Array.isArray(allMembers)) ? (() => {
+                const now = new Date()
+                return (allMembers as any[]).filter(m => {
+                    const start = m.membership_start_date ? new Date(m.membership_start_date) : null
+                    const end = m.membership_end_date ? new Date(m.membership_end_date) : null
+                    const started = !start || start <= now
+                    const notEnded = !end || end >= now
+                    return started && notEnded
+                }).length
+            })() : branchData.reduce((sum, b) => sum + b.active_members, 0)
         }
 
         return {

@@ -14,6 +14,7 @@ import type { BranchDashboardData } from '@/app/actions/gym'
 import FinancialMetricCard from '@/components/dashboard/FinancialMetricCard'
 import BranchStatsGrid from '@/components/dashboard/BranchStatsGrid'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import RevenueChart from '@/components/dashboard/RevenueChart'
 
 export default function GymDashboardPage() {
     const [mounted, setMounted] = useState(false)
@@ -170,16 +171,8 @@ export default function GymDashboardPage() {
                             <CardDescription className="text-stone-500">Monthly comparison across all branches</CardDescription>
                         </CardHeader>
                         <CardContent>
-                            <div className="h-60 flex items-center justify-center bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg border border-green-200 border-dashed">
-                                <div className="text-center">
-                                    <IndianRupee className="w-12 h-12 text-stone-300 mx-auto mb-3" />
-                                    <p className="text-stone-500 text-sm italic">
-                                        {dashboardData && dashboardData.branches.length > 0
-                                            ? 'Revenue and expense charts will appear here with more data.'
-                                            : 'Add branches and financial data to see revenue insights.'
-                                        }
-                                    </p>
-                                </div>
+                            <div className="h-60 rounded-lg border border-green-200">
+                                <RevenueChart />
                             </div>
                         </CardContent>
                     </Card>
