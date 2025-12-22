@@ -51,6 +51,10 @@ import {
     Phone,
     Mail,
 } from 'lucide-react'
+// reading search params from window in effect to avoid prerender/client-hook issues
+import MemberLedger from '@/components/MemberLedger'
+import { useRouter } from 'next/navigation'
+import CollectDuesDialog from '@/components/CollectDuesDialog'
 
 type Payment = {
     id: string
@@ -61,7 +65,7 @@ type Payment = {
     due_amount: number
     extra_amount: number
     payment_method: string
-    extra_discount: string
+    extra_discount: number | string
     status: string
     description: string
     created_at: string
@@ -72,18 +76,72 @@ type Payment = {
         membership_start_date?: string
         membership_end_date?: string
     }
+    net_balance?: number
+    remaining_on_date?: number
 }
 
 export default function ReceptionPaymentsPage() {
+    
     const [payments, setPayments] = useState<Payment[]>([])
     const [isLoading, setIsLoading] = useState(true)
     const [mounted, setMounted] = useState(false)
     const [searchQuery, setSearchQuery] = useState('')
+    const [filterMemberId, setFilterMemberId] = useState<string | null>(null)
+    const [filterStartDate, setFilterStartDate] = useState<string | null>(null)
+    const [filterEndDate, setFilterEndDate] = useState<string | null>(null)
     const [showReceiptModal, setShowReceiptModal] = useState(false)
     const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null)
     const [isGeneratingPDF, setIsGeneratingPDF] = useState(false)
     const supabase = createClient()
-    
+    const router = useRouter()
+    const [ledgerMemberId, setLedgerMemberId] = useState<string | null>(null)
+    const [ledgerMemberName, setLedgerMemberName] = useState<string | null>(null)
+    const [currentGymId, setCurrentGymId] = useState<string | null>(null)
+    const [currentBranchId, setCurrentBranchId] = useState<string | null>(null)
+    const [isCollectOpenPayments, setIsCollectOpenPayments] = useState(false)
+    const [collectMemberIdPayments, setCollectMemberIdPayments] = useState<string | null>(null)
+    const [collectMemberNamePayments, setCollectMemberNamePayments] = useState<string | null>(null)
+
+    useEffect(() => {
+        // read URL search params on client only
+        if (typeof window === 'undefined') return
+        const params = new URLSearchParams(window.location.search)
+        const id = params.get('memberId')
+        setLedgerMemberId(id)
+    }, [])
+
+    // update ledgerMemberId when user navigates with browser back/forward
+    useEffect(() => {
+        const onPop = () => {
+            const params = new URLSearchParams(window.location.search)
+            setLedgerMemberId(params.get('memberId'))
+        }
+        window.addEventListener('popstate', onPop)
+        return () => window.removeEventListener('popstate', onPop)
+    }, [])
+
+    useEffect(() => {
+        if (!ledgerMemberId) return
+        const fetchMember = async () => {
+            try {
+                const { data: member, error } = await supabase
+                    .from('members')
+                    .select('full_name')
+                    .eq('id', ledgerMemberId)
+                    .single()
+
+                if (!error && member) {
+                    setLedgerMemberName(member.full_name)
+                } else {
+                    setLedgerMemberName('Member')
+                }
+            } catch (err) {
+                setLedgerMemberName('Member')
+            }
+        }
+        fetchMember()
+    }, [ledgerMemberId, supabase])
+
     const formatDate = (input?: string | Date | null) => {
         if (!input) return 'N/A'
         const date = new Date(input)
@@ -133,7 +191,7 @@ export default function ReceptionPaymentsPage() {
             }
 
             // Fetch payments with member details - filtered by both gym_id AND branch_id
-            let query = supabase
+            const query = supabase
                 .from('payments')
                 .select(`
                     id,
@@ -162,6 +220,10 @@ export default function ReceptionPaymentsPage() {
 
             const { data, error } = await query
 
+            // store gym/branch for passing to ledger/collect dialog
+            setCurrentGymId(gymId || null)
+            setCurrentBranchId(branchId || null)
+
             if (error) throw error
 
             // supabase returns related rows as arrays; normalize member to single object
@@ -173,7 +235,52 @@ export default function ReceptionPaymentsPage() {
                     member: Array.isArray(obj.member) ? obj.member[0] ?? null : obj.member ?? null,
                 }
             })
-            setPayments(normalized)
+
+            // Compute running balance (remaining_on_date) per member (ledger-style)
+            try {
+                const memberIds = Array.from(new Set(normalized.map((p: Payment) => p.member_id).filter(Boolean)))
+                for (const mId of memberIds) {
+                    const rows = normalized
+                        .filter((r: Payment) => r.member_id === mId)
+                        .sort((a: Payment, b: Payment) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+
+                    let cumDebit = 0
+                    let cumCredit = 0
+                    for (const row of rows) {
+                        const debit = row.payable_amount && Number(row.payable_amount) > 0 ? Number(row.payable_amount) : 0
+                        const creditAmount = row.amount && Number(row.amount) > 0 ? Number(row.amount) : 0
+                        const extraDisc = typeof row.extra_discount === 'number' ? Number(row.extra_discount) : (Number(row.extra_discount) || 0)
+                        const credit = creditAmount + (extraDisc > 0 ? extraDisc : 0)
+
+                        cumDebit += debit
+                        cumCredit += credit
+
+                        // remaining_on_date after this row (ledger-style)
+                        row.remaining_on_date = cumDebit - cumCredit
+                    }
+                }
+
+                // Also attach overall net_balance from view for quick reference (optional)
+                const { data: balances, error: balancesError } = await supabase
+                    .from('member_balances')
+                    .select('member_id, net_balance')
+                    .in('member_id', Array.from(new Set(normalized.map((p: Payment) => p.member_id).filter(Boolean))))
+
+                if (!balancesError && balances) {
+                    const balanceByMember = new Map((balances || []).map((b: { member_id: string, net_balance: number }) => [b.member_id, Number(b.net_balance)]))
+                    const enriched = normalized.map((p: Payment) => ({
+                        ...p,
+                        net_balance: balanceByMember.get(p.member_id) ?? 0,
+                        remaining_on_date: p.remaining_on_date ?? 0
+                    }))
+                    setPayments(enriched)
+                } else {
+                    setPayments(normalized)
+                }
+            } catch (err) {
+                console.error('Error computing running balances or fetching member balances:', err)
+                setPayments(normalized)
+            }
         } catch (error) {
             console.error('Error fetching payments:', error)
             toast.error('Failed to fetch payments')
@@ -188,14 +295,61 @@ export default function ReceptionPaymentsPage() {
     }, [fetchPayments])
 
     const filteredPayments = useMemo(() => {
-        return payments.filter(payment =>
-            payment.member?.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            payment.member?.phone?.includes(searchQuery) ||
-            payment.member?.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            payment.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            payment.payment_method?.toLowerCase().includes(searchQuery.toLowerCase())
-        )
-    }, [payments, searchQuery])
+        return payments.filter(payment => {
+            // basic text search
+            const matchesSearch =
+                payment.member?.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                payment.member?.phone?.includes(searchQuery) ||
+                payment.member?.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                payment.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                payment.payment_method?.toLowerCase().includes(searchQuery.toLowerCase())
+
+            if (!matchesSearch) return false
+
+            // member filter
+            if (filterMemberId && payment.member_id !== filterMemberId) return false
+
+            // date filters (compare only date part)
+            const created = payment.created_at ? new Date(payment.created_at) : null
+            if (filterStartDate && created) {
+                const start = new Date(filterStartDate + 'T00:00:00')
+                if (created < start) return false
+            }
+            if (filterEndDate && created) {
+                const end = new Date(filterEndDate + 'T23:59:59')
+                if (created > end) return false
+            }
+
+            return true
+        })
+    }, [payments, searchQuery, filterMemberId, filterStartDate, filterEndDate])
+
+    // derive unique members for filter dropdown
+    const uniqueMembers = useMemo(() => {
+        const map = new Map<string, { id: string, name: string }>()
+        payments.forEach(p => {
+            if (p.member && p.member_id) {
+                map.set(p.member_id, { id: p.member_id, name: p.member.full_name })
+            }
+        })
+        return Array.from(map.values())
+    }, [payments])
+
+    // totals for filtered view: sum of received and sum of charges (DR)
+    const filteredTotals = useMemo(() => {
+        return filteredPayments.reduce((acc, p) => {
+            acc.totalReceived += Number(p.amount || 0)
+            acc.totalDue += Number(p.payable_amount || 0)
+            return acc
+        }, { totalReceived: 0, totalDue: 0 })
+    }, [filteredPayments])
+
+    // latest remaining_on_date across filtered rows (most recent date)
+    const latestRemaining = useMemo(() => {
+        if (!filteredPayments || filteredPayments.length === 0) return 0
+        const sorted = [...filteredPayments].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        return Number(sorted[0].remaining_on_date ?? 0)
+    }, [filteredPayments])
 
     const getPaymentMethodIcon = (method: string) => {
         switch (method?.toLowerCase()) {
@@ -217,9 +371,27 @@ export default function ReceptionPaymentsPage() {
         }
     }
 
-    const handleViewReceipt = (payment: Payment) => {
-        setSelectedPayment(payment)
-        setShowReceiptModal(true)
+    const handleViewReceipt = async (payment: Payment) => {
+        try {
+            // Try to get authoritative remaining_on_date via RPC
+            const rpc = await supabase.rpc('get_member_balance_at', { p_member: payment.member_id, p_as_of: payment.created_at })
+            let remaining = payment.remaining_on_date ?? payment.net_balance ?? 0
+            if (!rpc.error && rpc.data) {
+                if (Array.isArray(rpc.data) && rpc.data.length > 0) {
+                    remaining = Number(rpc.data[0].net_balance || remaining)
+                } else if (typeof rpc.data === 'object' && 'net_balance' in rpc.data) {
+                    remaining = Number((rpc.data as any).net_balance || remaining)
+                } else if (typeof rpc.data === 'number') {
+                    remaining = Number(rpc.data)
+                }
+            }
+            setSelectedPayment({ ...payment, remaining_on_date: remaining })
+        } catch (err) {
+            console.error('Error fetching remaining for receipt view', err)
+            setSelectedPayment(payment)
+        } finally {
+            setShowReceiptModal(true)
+        }
     }
 
     const handlePrintReceipt = async (payment: Payment) => {
@@ -265,6 +437,22 @@ export default function ReceptionPaymentsPage() {
         const { data: { user } } = await supabase.auth.getUser()
         const gymName = user?.user_metadata?.gym_name || 'Your Gym'
         const gymAddress = user?.user_metadata?.gym_address || ''
+
+        // fetch remaining dues as of payment.created_at for authoritative value
+        try {
+            const rpc = await supabase.rpc('get_member_balance_at', { p_member: payment.member_id, p_as_of: payment.created_at })
+            if (!rpc.error && rpc.data) {
+                if (Array.isArray(rpc.data) && rpc.data.length > 0) {
+                    payment = { ...payment, remaining_on_date: Number(rpc.data[0].net_balance || 0) }
+                } else if (typeof rpc.data === 'object' && 'net_balance' in rpc.data) {
+                    payment = { ...payment, remaining_on_date: Number((rpc.data as any).net_balance || 0) }
+                } else if (typeof rpc.data === 'number') {
+                    payment = { ...payment, remaining_on_date: Number(rpc.data) }
+                }
+            }
+        } catch (err) {
+            console.error('Error fetching remaining dues for WhatsApp', err)
+        }
 
         // Format phone number for WhatsApp
         const phoneNumber = await formatPhoneForWa(payment.member?.phone)
@@ -314,6 +502,20 @@ export default function ReceptionPaymentsPage() {
         const gymName = user?.user_metadata?.gym_name || 'Your Gym'
         const gymAddress = user?.user_metadata?.gym_address || ''
 
+        // get remaining dues as of payment.created_at via RPC for PDF
+        let remainingDuesDisplay = '₹0'
+        try {
+            const rpc = await supabase.rpc('get_member_balance_at', { p_member: payment.member_id, p_as_of: payment.created_at })
+            if (!rpc.error && rpc.data && Array.isArray(rpc.data) && rpc.data.length > 0) {
+                remainingDuesDisplay = `₹${Number(rpc.data[0].net_balance || 0).toLocaleString('en-IN')}`
+            } else if (!rpc.error && rpc.data && typeof rpc.data === 'object' && 'net_balance' in rpc.data) {
+                const obj = rpc.data as { net_balance?: number }
+                remainingDuesDisplay = `₹${Number(obj.net_balance || 0).toLocaleString('en-IN')}`
+            }
+        } catch (err) {
+            console.error('Error fetching remaining dues for PDF', err)
+        }
+
         // Create a temporary div with the receipt HTML
         const receiptElement = document.createElement('div')
         receiptElement.innerHTML = `
@@ -357,17 +559,13 @@ export default function ReceptionPaymentsPage() {
                             <p style="font-size: 12px; font-weight: 600; color: #6b7280; margin: 0;">PAYMENT METHOD</p>
                             <p style="font-size: 16px; font-weight: 500; color: #111827; margin: 5px 0;">${payment.payment_method.charAt(0).toUpperCase() + payment.payment_method.slice(1)}</p>
                         </div>
-                        <div>
-                            <p style="font-size: 12px; font-weight: 600; color: #6b7280; margin: 0;">PAYMENT TYPE</p>
-                            <p style="font-size: 16px; font-weight: 500; color: #111827; margin: 5px 0;">${payment.extra_discount.replace('_', ' ').charAt(0).toUpperCase() + payment.extra_discount.replace('_', ' ').slice(1)}</p>
+                        <div style="grid-column: span 2;">
+                            <p style="font-size: 12px; font-weight: 600; color: #6b7280; margin: 0;">SUMMARY</p>
+                            <p style="font-size: 14px; font-weight: 500; color: #111827; margin: 5px 0; word-break: break-word;">${payment.description || 'General Payment'}</p>
                         </div>
                         <div>
                             <p style="font-size: 12px; font-weight: 600; color: #6b7280; margin: 0;">DATE & TIME</p>
                             <p style="font-size: 16px; font-weight: 500; color: #111827; margin: 5px 0;">${formatDateTime(payment.created_at)}</p>
-                        </div>
-                        <div>
-                            <p style="font-size: 12px; font-weight: 600; color: #6b7280; margin: 0;">STATUS</p>
-                            <p style="font-size: 16px; font-weight: 500; color: #111827; margin: 5px 0;">${payment.status.charAt(0).toUpperCase() + payment.status.slice(1)}</p>
                         </div>
                     </div>
                 </div>
@@ -384,6 +582,11 @@ export default function ReceptionPaymentsPage() {
                     <p style="font-size: 16px; font-weight: 500; color: #111827; margin: 5px 0;">${payment.description}</p>
                 </div>
                 ` : ''}
+
+                <!-- Remaining Dues (always shown) -->
+                <div style="margin-bottom: 20px;">
+                    <p style="font-size:12px;color:#6b7280;margin:6px 0 0 0;">Remaining Dues (as of ${formatDateTime(payment.created_at)}): <strong style="color:#b91c1c">${remainingDuesDisplay}</strong></p>
+                </div>
 
                 <!-- Footer -->
                 <div style="text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
@@ -467,6 +670,20 @@ export default function ReceptionPaymentsPage() {
         const gymAddress = user?.user_metadata?.gym_address || ''
         const receiptId = generateReceiptID(payment)
 
+        // get remaining dues as of payment.created_at via RPC
+        let remainingDuesDisplay = '₹0'
+        try {
+            const rpc = await supabase.rpc('get_member_balance_at', { p_member: payment.member_id, p_as_of: payment.created_at })
+            if (!rpc.error && rpc.data && Array.isArray(rpc.data) && rpc.data.length > 0) {
+                remainingDuesDisplay = `₹${Number(rpc.data[0].net_balance || 0).toLocaleString('en-IN')}`
+            } else if (!rpc.error && rpc.data && typeof rpc.data === 'object' && 'net_balance' in rpc.data) {
+                const obj = rpc.data as { net_balance?: number }
+                remainingDuesDisplay = `₹${Number(obj.net_balance || 0).toLocaleString('en-IN')}`
+            }
+        } catch (err) {
+            console.error('Error fetching remaining dues via RPC', err)
+        }
+
         return `
             <!DOCTYPE html>
             <html>
@@ -525,17 +742,13 @@ export default function ReceptionPaymentsPage() {
                                     <div class="info-label">Payment Method</div>
                                     <div class="info-value">${payment.payment_method.charAt(0).toUpperCase() + payment.payment_method.slice(1)}</div>
                                 </div>
-                                <div class="info-item">
-                                    <div class="info-label">Payment Type</div>
-                                    <div class="info-value">${payment.extra_discount.replace('_', ' ').charAt(0).toUpperCase() + payment.extra_discount.replace('_', ' ').slice(1)}</div>
+                                <div class="info-item" style="grid-column: span 2;">
+                                    <div class="info-label">Summary</div>
+                                    <div class="info-value" style="font-size: 14px; line-height: 1.4;">${payment.description || 'General Payment'}</div>
                                 </div>
                                 <div class="info-item">
                                     <div class="info-label">Date & Time</div>
                                     <div class="info-value">${formatDateTime(payment.created_at)}</div>
-                                </div>
-                                <div class="info-item">
-                                    <div class="info-label">Status</div>
-                                    <div class="info-value">${payment.status.charAt(0).toUpperCase() + payment.status.slice(1)}</div>
                                 </div>
                             </div>
                         </div>
@@ -549,6 +762,7 @@ export default function ReceptionPaymentsPage() {
                         <div class="info-item" style="margin-bottom: 20px;">
                             <div class="info-label">Description</div>
                             <div class="info-value">${payment.description}</div>
+                            <p style="font-size:12px;color:#6b7280;margin:6px 0 0 0;">Remaining Dues (as of ${formatDateTime(payment.created_at)}): <strong style="color:#b91c1c">${remainingDuesDisplay}</strong></p>
                         </div>
                         ` : ''}
 
@@ -586,13 +800,14 @@ Valid Till: ${validTill}
 
 Payment Information:
 Method: ${payment.payment_method.charAt(0).toUpperCase() + payment.payment_method.slice(1)}
-Type: ${payment.extra_discount.replace('_', ' ').charAt(0).toUpperCase() + payment.extra_discount.replace('_', ' ').slice(1)}
+Summary: ${payment.description || 'General Payment'}
 Date: ${paymentDate}
-Status: ${payment.status.charAt(0).toUpperCase() + payment.status.slice(1)}
 
 Amount Paid: ₹${payment.amount.toLocaleString('en-IN')}
 
 ${payment.description ? `Description: ${payment.description}` : ''}
+
+Remaining Dues (as of ${formatDateTime(payment.created_at)}): ₹${String(payment.remaining_on_date ?? '')}
 
 ${gymAddress ? `Address: ${gymAddress}` : ''}
 
@@ -701,6 +916,20 @@ Generated on: ${formatDateTime(new Date())}`
             },
         },
         {
+            accessorKey: 'remaining_on_date',
+            header: 'Remaining Dues on Date',
+            size: 160,
+            cell: ({ row }) => {
+                const balance = (row.getValue('remaining_on_date') as number) ?? 0
+                const isReceivable = balance > 0
+                return (
+                    <div className={`font-bold ${isReceivable ? 'text-red-600' : 'text-emerald-600'}`}>
+                        ₹{Math.abs(balance).toLocaleString('en-IN')}
+                    </div>
+                )
+            },
+        },
+        {
             accessorKey: 'description',
             header: 'Description',
             size: 200,
@@ -740,12 +969,30 @@ Generated on: ${formatDateTime(new Date())}`
                                 <Eye className="w-4 h-4" />
                                 View Receipt
                             </DropdownMenuItem>
+                            {/* 'Show Ledger' action removed from Payments page (kept in Accounts only) */}
                             <DropdownMenuItem
                                 className="cursor-pointer flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-blue-50 text-blue-700 font-medium"
                                 onClick={() => handlePrintReceipt(payment)}
                             >
                                 <Printer className="w-4 h-4" />
                                 Print Receipt
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                                className="cursor-pointer flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-emerald-50 text-emerald-700 font-medium"
+                                onClick={() => {
+                                    const memberId = payment.member_id
+                                    const memberName = payment.member?.full_name || ''
+                                    if (memberId) {
+                                        setCollectMemberIdPayments(memberId)
+                                        setCollectMemberNamePayments(memberName)
+                                        setIsCollectOpenPayments(true)
+                                    } else {
+                                        toast.error('Member id not available')
+                                    }
+                                }}
+                            >
+                                <IndianRupee className="w-4 h-4" />
+                                Collect Dues
                             </DropdownMenuItem>
                             <DropdownMenuItem
                                 className="cursor-pointer flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-green-50 text-green-700 font-medium"
@@ -778,13 +1025,26 @@ Generated on: ${formatDateTime(new Date())}`
         <div className="space-y-6 -mt-8">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-3xl font-bold bg-gradient-to-r from-emerald-800 to-teal-800 bg-clip-text text-transparent underline decoration-emerald-200 decoration-4 underline-offset-8">
-                        Payment Records
-                    </h1>
-                    <p className="text-stone-500 mt-4 font-medium flex items-center gap-2">
-                        <CreditCard className="w-4 h-4 text-emerald-600" />
-                        Track all payments and transactions in your gym.
-                    </p>
+                    <div className="flex items-center gap-3">
+                        {ledgerMemberId && (
+                            <Button
+                                variant="ghost"
+                                onClick={() => router.push('/reception/payments')}
+                                className="text-stone-600 -ml-2"
+                            >
+                                ← Back
+                            </Button>
+                        )}
+                        <div>
+                            <h1 className="text-3xl font-bold bg-gradient-to-r from-emerald-800 to-teal-800 bg-clip-text text-transparent underline decoration-emerald-200 decoration-4 underline-offset-8">
+                                Payment Records
+                            </h1>
+                            <p className="text-stone-500 mt-4 font-medium flex items-center gap-2">
+                                <CreditCard className="w-4 h-4 text-emerald-600" />
+                                Track all payments and transactions in your gym.
+                            </p>
+                        </div>
+                    </div>
                 </div>
 
                 <div className="flex items-center gap-4">
@@ -811,6 +1071,34 @@ Generated on: ${formatDateTime(new Date())}`
                         className="pl-10 h-10 rounded-xl border-green-200 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/10 bg-white"
                     />
                 </div>
+                <div className="flex items-center gap-3 ml-4">
+                    <select
+                        value={filterMemberId ?? ''}
+                        onChange={(e) => setFilterMemberId(e.target.value || null)}
+                        className="h-10 rounded-xl border-2 border-stone-100 bg-white px-3 text-sm"
+                    >
+                        <option value="">All Members</option>
+                        {uniqueMembers.map(m => (
+                            <option key={m.id} value={m.id}>{m.name}</option>
+                        ))}
+                    </select>
+
+                    <Input
+                        type="date"
+                        value={filterStartDate ?? ''}
+                        onChange={(e) => setFilterStartDate(e.target.value || null)}
+                        className="h-10 rounded-xl border-2 border-stone-100 bg-white px-3 text-sm"
+                    />
+                    <Input
+                        type="date"
+                        value={filterEndDate ?? ''}
+                        onChange={(e) => setFilterEndDate(e.target.value || null)}
+                        className="h-10 rounded-xl border-2 border-stone-100 bg-white px-3 text-sm"
+                    />
+                    <Button variant="outline" className="h-10" onClick={() => { setFilterMemberId(null); setFilterStartDate(null); setFilterEndDate(null); setSearchQuery('') }}>
+                        Reset
+                    </Button>
+                </div>
             </div>
 
             {isLoading ? (
@@ -818,14 +1106,45 @@ Generated on: ${formatDateTime(new Date())}`
                     <Loader2 className="w-10 h-10 text-emerald-800 animate-spin" />
                     <p className="text-stone-500 font-bold uppercase tracking-widest text-xs animate-pulse">Loading Payments...</p>
                 </div>
+                ) : ledgerMemberId ? (
+                // When ?memberId is present in the URL, hide the payments table and show the member ledger
+                <MemberLedger
+                    memberId={ledgerMemberId}
+                    memberName={ledgerMemberName ?? 'Member'}
+                    branchId={currentBranchId}
+                    gymId={currentGymId}
+                    onTransactionSuccess={fetchPayments}
+                    onClose={() => {
+                        setLedgerMemberId(null)
+                        router.push('/reception/payments')
+                    }}
+                />
             ) : (
-                <DataTable columns={columns} data={filteredPayments} />
+                <>
+                    <DataTable columns={columns} data={filteredPayments} />
+
+                    {/* Totals for filtered data */}
+                    <div className="mt-6 flex gap-4 items-center justify-end">
+                        <div className="bg-white p-4 rounded-xl border border-green-100 shadow-sm text-sm">
+                            <div className="text-xs text-stone-500">Total Received</div>
+                            <div className="font-bold text-emerald-700">₹{filteredTotals.totalReceived.toLocaleString('en-IN')}</div>
+                        </div>
+                        <div className="bg-white p-4 rounded-xl border border-green-100 shadow-sm text-sm">
+                            <div className="text-xs text-stone-500">Total Charges (DR)</div>
+                            <div className="font-bold text-red-600">₹{filteredTotals.totalDue.toLocaleString('en-IN')}</div>
+                        </div>
+                        <div className="bg-white p-4 rounded-xl border border-green-100 shadow-sm text-sm">
+                            <div className="text-xs text-stone-500">Remaining (latest)</div>
+                            <div className="font-bold text-red-600">₹{latestRemaining.toLocaleString('en-IN')}</div>
+                        </div>
+                    </div>
+                </>
             )}
 
             {/* Receipt Modal */}
             <Dialog open={showReceiptModal} onOpenChange={setShowReceiptModal}>
-                <DialogContent className="sm:max-w-[600px] bg-white rounded-2xl border-none shadow-2xl p-0 overflow-hidden">
-                    <DialogHeader className="bg-gradient-to-r from-emerald-800 to-teal-800 text-white p-6">
+                <DialogContent className="sm:max-w-[600px] max-h-[92vh] overflow-y-auto bg-white rounded-2xl border-none shadow-2xl p-0 scrollbar-hide">
+                    <DialogHeader className="bg-gradient-to-r from-emerald-800 to-teal-800 text-white p-6 sticky top-0 z-10">
                         <DialogTitle className="text-2xl font-bold flex items-center gap-2">
                             <Receipt className="w-6 h-6" />
                             Payment Receipt
@@ -877,11 +1196,13 @@ Generated on: ${formatDateTime(new Date())}`
                                             <span className="font-medium capitalize">{selectedPayment.payment_method}</span>
                                         </div>
                                     </div>
-                                    <div className="space-y-2">
-                                        <Label className="text-sm font-semibold text-gray-700">Payment Type</Label>
-                                        <Badge variant="outline" className="capitalize font-bold rounded-lg border-2 border-purple-200 bg-purple-50 text-purple-800">
-                                            {selectedPayment.extra_discount.replace('_', ' ')}
-                                        </Badge>
+                                    <div className="col-span-2 space-y-2">
+                                        <Label className="text-sm font-semibold text-gray-700">Summary</Label>
+                                        <div className="flex flex-wrap">
+                                            <Badge variant="outline" className="capitalize font-bold rounded-lg border-2 border-purple-200 bg-purple-50 text-purple-800 whitespace-normal h-auto py-1 px-3 text-left">
+                                                {selectedPayment.description || 'General Payment'}
+                                            </Badge>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -897,31 +1218,15 @@ Generated on: ${formatDateTime(new Date())}`
                                 </div>
 
                                 {/* Additional Details */}
-                                <div className="grid grid-cols-2 gap-6 mb-6">
-                                    <div className="space-y-2">
-                                        <Label className="text-sm font-semibold text-gray-700">Date & Time</Label>
-                                        <p className="font-medium text-gray-900">{formatDateTime(selectedPayment.created_at)}</p>
-                                    </div>
-                                    <div className="space-y-2">
-                                        <Label className="text-sm font-semibold text-gray-700">Status</Label>
-                                        <div className="flex items-center gap-2">
-                                            {getStatusIcon(selectedPayment.status)}
-                                            <Badge
-                                                variant="outline"
-                                                className={`capitalize font-bold rounded-lg border-2 ${
-                                                    selectedPayment.status === 'completed'
-                                                        ? 'border-green-200 bg-green-50 text-green-800'
-                                                        : selectedPayment.status === 'pending'
-                                                        ? 'border-yellow-200 bg-yellow-50 text-yellow-800'
-                                                        : selectedPayment.status === 'failed'
-                                                        ? 'border-red-200 bg-red-50 text-red-800'
-                                                        : 'border-blue-200 bg-blue-50 text-blue-800'
-                                                }`}
-                                            >
-                                                {selectedPayment.status}
-                                            </Badge>
-                                        </div>
-                                    </div>
+                                <div className="col-span-2 space-y-2">
+                                    <Label className="text-sm font-semibold text-gray-700">Date & Time</Label>
+                                    <p className="font-medium text-gray-900">{formatDateTime(selectedPayment.created_at)}</p>
+                                </div>
+
+                                {/* Remaining dues as of this payment */}
+                                <div className="mb-4">
+                                    <Label className="text-sm font-semibold text-gray-700">Remaining Dues (as of this payment)</Label>
+                                    <p className="text-red-600 font-bold mt-1">₹{Number(selectedPayment.remaining_on_date ?? selectedPayment.net_balance ?? 0).toLocaleString('en-IN')}</p>
                                 </div>
 
                                 {selectedPayment.description && (
@@ -976,6 +1281,19 @@ Generated on: ${formatDateTime(new Date())}`
                     )}
                 </DialogContent>
             </Dialog>
+            <CollectDuesDialog
+                open={isCollectOpenPayments}
+                onOpenChange={setIsCollectOpenPayments}
+                memberId={collectMemberIdPayments ?? ''}
+                memberName={collectMemberNamePayments ?? ''}
+                totalDues={Number(payments.find(p => p.member_id === collectMemberIdPayments)?.net_balance ?? 0)}
+                branchId={currentBranchId}
+                gymId={currentGymId}
+                onSuccess={() => {
+                    fetchPayments()
+                    setIsCollectOpenPayments(false)
+                }}
+            />
         </div>
     )
 }

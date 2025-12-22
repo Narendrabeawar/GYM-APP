@@ -251,6 +251,222 @@ BEGIN
     END LOOP;
 END $$;
 
+-- Ensure INSERT policy exists for payments (WITH CHECK) so authenticated gym staff can insert rows
+-- Helper function used by INSERT policy (avoids referencing NEW inside DO block)
+CREATE OR REPLACE FUNCTION public.can_insert_payment(p_gym_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid()
+      AND role IN ('admin', 'gym_admin', 'branch_admin', 'receptionist')
+      AND gym_id = p_gym_id
+  );
+$$;
+
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'payments' AND policyname = 'Gym staff can insert payments') THEN
+        CREATE POLICY "Gym staff can insert payments" ON public.payments
+        FOR INSERT
+        WITH CHECK (
+            public.can_insert_payment(gym_id)
+        );
+    END IF;
+END $$;
+
+-- ==========================================
+-- MEMBER BALANCES VIEW & RPCs
+-- Provides per-member aggregated net balance used by UI
+-- ==========================================
+
+-- View: member_balances
+CREATE OR REPLACE VIEW public.member_balances AS
+SELECT
+  member_id,
+  COALESCE(SUM(COALESCE(payable_amount, 0)), 0)::numeric AS total_debit,
+  COALESCE(SUM(COALESCE(amount, 0)), 0)::numeric AS total_paid,
+  COALESCE(SUM(
+    CASE
+      WHEN extra_discount IS NULL THEN 0
+      WHEN extra_discount::text ~ '^[0-9]+(\\.[0-9]+)?$' THEN extra_discount::numeric
+      ELSE 0
+    END
+  ), 0)::numeric AS total_extra_discount,
+  (
+    COALESCE(SUM(COALESCE(payable_amount, 0)), 0)
+    - (
+        COALESCE(SUM(COALESCE(amount, 0)), 0)
+        + COALESCE(SUM(
+            CASE
+              WHEN extra_discount IS NULL THEN 0
+              WHEN extra_discount::text ~ '^[0-9]+(\\.[0-9]+)?$' THEN extra_discount::numeric
+              ELSE 0
+            END
+          ), 0)
+      )
+  )::numeric AS net_balance
+FROM public.payments
+GROUP BY member_id;
+
+-- RPC: get_member_balance(p_member uuid) -> numeric
+CREATE OR REPLACE FUNCTION public.get_member_balance(p_member uuid)
+RETURNS numeric
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT (
+    COALESCE(SUM(COALESCE(payable_amount,0)),0)
+    - (
+        COALESCE(SUM(COALESCE(amount,0)),0)
+        + COALESCE(SUM(
+            CASE
+              WHEN extra_discount IS NULL THEN 0
+              WHEN extra_discount::text ~ '^[0-9]+(\\.[0-9]+)?$' THEN extra_discount::numeric
+              ELSE 0
+            END
+          ),0)
+      )
+  )::numeric AS net_balance
+  FROM public.payments
+  WHERE member_id = p_member;
+$$;
+
+-- RPC: get_balances_for_members(p_members uuid[]) -> table (member_id, net_balance)
+CREATE OR REPLACE FUNCTION public.get_balances_for_members(p_members uuid[])
+RETURNS TABLE(member_id uuid, net_balance numeric)
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT mb.member_id, mb.net_balance
+  FROM public.member_balances mb
+  WHERE mb.member_id = ANY(p_members);
+$$;
+
+-- RPC: create_payment_and_get_balance(...) -> returns inserted payment id and updated net_balance
+CREATE OR REPLACE FUNCTION public.create_payment_and_get_balance(
+  p_member uuid,
+  p_amount numeric,
+  p_payable_amount numeric,
+  p_extra_discount numeric,
+  p_payment_method text DEFAULT NULL,
+  p_description text DEFAULT NULL
+)
+RETURNS TABLE(payment_id uuid, net_balance numeric)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  new_id uuid;
+BEGIN
+  INSERT INTO public.payments (
+    member_id, amount, payable_amount, extra_discount, payment_method, description, created_at
+  )
+  VALUES (
+    p_member, p_amount, p_payable_amount, p_extra_discount, p_payment_method, p_description, now()
+  )
+  RETURNING id INTO new_id;
+
+  RETURN QUERY
+  SELECT new_id AS payment_id,
+    (
+      SELECT (
+        COALESCE(SUM(COALESCE(payable_amount,0)),0)
+        - (
+            COALESCE(SUM(COALESCE(amount,0)),0)
+            + COALESCE(SUM(
+                CASE
+                  WHEN extra_discount IS NULL THEN 0
+                  WHEN extra_discount::text ~ '^[0-9]+(\\.[0-9]+)?$' THEN extra_discount::numeric
+                  ELSE 0
+                END
+              ),0)
+          )
+      )::numeric
+      FROM public.payments
+      WHERE member_id = p_member
+    ) AS net_balance;
+END;
+$$;
+
+-- RPC: get_member_balance_at(member uuid, as_of timestamptz) -> returns net_balance as of given timestamp
+CREATE OR REPLACE FUNCTION public.get_member_balance_at(p_member uuid, p_as_of timestamptz)
+RETURNS TABLE(net_balance numeric)
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT (
+    COALESCE(SUM(COALESCE(payable_amount,0)),0)
+    - (
+        COALESCE(SUM(COALESCE(amount,0)),0)
+        + COALESCE(SUM(
+            CASE
+              WHEN extra_discount IS NULL THEN 0
+              WHEN extra_discount::text ~ '^[0-9]+(\\.[0-9]+)?$' THEN extra_discount::numeric
+              ELSE 0
+            END
+          ),0)
+      )
+  )::numeric AS net_balance
+  FROM public.payments
+  WHERE member_id = p_member
+    AND created_at <= p_as_of;
+$$;
+
+-- ==========================================
+-- BRANCH P&L VIEW + RPC
+-- Aggregates transactions and payments per branch and day
+-- ==========================================
+-- Corrected branch_pnl view: aggregate payments and transactions separately then join to avoid duplication
+CREATE OR REPLACE VIEW public.branch_pnl AS
+WITH tx AS (
+  SELECT
+    branch_id,
+    date_trunc('day', COALESCE(date, created_at))::date AS day,
+    SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END)::numeric AS total_transactions_income,
+    SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END)::numeric AS total_transactions_expense
+  FROM public.transactions
+  GROUP BY branch_id, date_trunc('day', COALESCE(date, created_at))::date
+),
+pay AS (
+  SELECT
+    branch_id,
+    date_trunc('day', created_at)::date AS day,
+    SUM(COALESCE(amount,0))::numeric AS total_payments_revenue
+  FROM public.payments
+  GROUP BY branch_id, date_trunc('day', created_at)::date
+)
+SELECT
+  COALESCE(tx.branch_id, pay.branch_id) AS branch_id,
+  COALESCE(tx.day, pay.day) AS day,
+  COALESCE(tx.total_transactions_income,0)::numeric AS total_transactions_income,
+  COALESCE(tx.total_transactions_expense,0)::numeric AS total_transactions_expense,
+  COALESCE(pay.total_payments_revenue,0)::numeric AS total_payments_revenue,
+  (COALESCE(tx.total_transactions_income,0) + COALESCE(pay.total_payments_revenue,0))::numeric AS total_income,
+  COALESCE(tx.total_transactions_expense,0)::numeric AS total_expense,
+  ((COALESCE(tx.total_transactions_income,0) + COALESCE(pay.total_payments_revenue,0)) - COALESCE(tx.total_transactions_expense,0))::numeric AS net_profit
+FROM tx
+FULL OUTER JOIN pay
+  ON tx.branch_id = pay.branch_id
+  AND tx.day = pay.day;
+
+-- RPC: get_branch_pnl(branch, start_date, end_date)
+CREATE OR REPLACE FUNCTION public.get_branch_pnl(p_branch uuid DEFAULT NULL, p_start date DEFAULT NULL, p_end date DEFAULT NULL)
+RETURNS TABLE(branch_id uuid, day date, total_income numeric, total_expense numeric, net_profit numeric)
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT branch_id, day, SUM(total_income) AS total_income, SUM(total_expense) AS total_expense, SUM(net_profit) AS net_profit
+  FROM public.branch_pnl
+  WHERE (p_branch IS NULL OR branch_id = p_branch)
+    AND (p_start IS NULL OR day >= p_start)
+    AND (p_end IS NULL OR day <= p_end)
+  GROUP BY branch_id, day
+  ORDER BY day;
+$$;
+
+
+
 -- POLICIES (Idempotent using DO blocks)
 
 -- GYMS
@@ -531,3 +747,61 @@ ALTER TABLE public.enquiries ADD COLUMN IF NOT EXISTS blood_group VARCHAR(10);
 ALTER TABLE public.enquiries ADD COLUMN IF NOT EXISTS height DECIMAL(5, 2);
 ALTER TABLE public.enquiries ADD COLUMN IF NOT EXISTS weight DECIMAL(5, 2);
 ALTER TABLE public.enquiries ADD COLUMN IF NOT EXISTS fitness_goal VARCHAR(255);
+
+-- ==========================================
+-- 💰 TRANSACTIONS & BOOKKEEPING
+-- ==========================================
+
+-- 1. Transactions Table
+CREATE TABLE IF NOT EXISTS public.transactions (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    gym_id UUID REFERENCES public.gyms(id) ON DELETE CASCADE,
+    branch_id UUID REFERENCES public.branches(id) ON DELETE CASCADE,
+    type TEXT CHECK (type IN ('income', 'expense')) NOT NULL,
+    amount DECIMAL(10,2) NOT NULL,
+    category TEXT NOT NULL,
+    reference_name TEXT,
+    description TEXT,
+    payment_method TEXT DEFAULT 'cash',
+    status TEXT DEFAULT 'completed',
+    date DATE DEFAULT CURRENT_DATE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 2. Transaction Categories (for dropdown and suggestions)
+CREATE TABLE IF NOT EXISTS public.transaction_categories (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    gym_id UUID REFERENCES public.gyms(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    type TEXT CHECK (type IN ('income', 'expense')) NOT NULL,
+    UNIQUE(gym_id, name, type)
+);
+
+-- 3. RLS Policies
+ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.transaction_categories ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'transactions' AND policyname = 'Gym staff can manage transactions') THEN
+        CREATE POLICY "Gym staff can manage transactions" ON public.transactions FOR ALL USING (
+            EXISTS (
+                SELECT 1 FROM public.profiles 
+                WHERE id = auth.uid() 
+                AND gym_id = public.transactions.gym_id
+                AND role IN ('admin', 'gym_admin', 'branch_admin', 'receptionist')
+            )
+        );
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'transaction_categories' AND policyname = 'Gym staff can manage categories') THEN
+        CREATE POLICY "Gym staff can manage categories" ON public.transaction_categories FOR ALL USING (
+            EXISTS (
+                SELECT 1 FROM public.profiles 
+                WHERE id = auth.uid() 
+                AND gym_id = public.transaction_categories.gym_id
+                AND role IN ('admin', 'gym_admin', 'branch_admin', 'receptionist')
+            )
+        );
+    END IF;
+END $$;

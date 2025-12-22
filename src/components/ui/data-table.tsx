@@ -69,7 +69,7 @@ export function DataTable<TData, TValue>({
                                 {row.getVisibleCells().map((cell) => (
                                     <TableCell
                                         key={cell.id}
-                                        className="py-4 text-stone-600 border-x border-green-200 first:border-l-0 last:border-r-0"
+                                        className="py-2 text-stone-600 border-x border-green-200 first:border-l-0 last:border-r-0"
                                         style={{ width: cell.column.columnDef.size }}
                                     >
                                         {flexRender(cell.column.columnDef.cell, cell.getContext())}

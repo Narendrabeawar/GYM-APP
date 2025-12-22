@@ -387,3 +387,238 @@ export async function getBranchSettings(branchId: string) {
         return null
     }
 }
+
+export interface BranchDashboardData {
+    branch: {
+        id: string
+        name: string
+        address?: string
+        phone?: string
+        manager_name?: string
+        status: 'active' | 'inactive'
+        member_capacity?: number
+        established_year?: number
+    }
+    financials: {
+        total_income: number
+        total_expenses: number
+        net_profit: number
+        monthly_revenue: number
+    }
+    members: {
+        total_members: number
+        active_members: number
+        inactive_members: number
+        pending_members: number
+    }
+    plans: {
+        total_plans: number
+        active_plans: number
+    }
+    recent_activity: {
+        new_members_today: number
+        new_members_this_week: number
+        // monetary totals for today
+        todays_income: number
+        todays_expenses: number
+        // legacy counts (optional)
+        payments_today?: number
+        payments_this_week?: number
+    }
+}
+
+export async function getBranchDashboardData(branchId: string): Promise<BranchDashboardData | null> {
+    if (!branchId) return null
+
+    const supabase = createAdminClient()
+
+    try {
+        // Get branch basic info
+        const { data: branch, error: branchError } = await supabase
+            .from('branches')
+            .select('id, name, address, phone, manager_name, status, member_capacity, established_year')
+            .eq('id', branchId)
+            .single()
+
+        if (branchError) {
+            console.error('Error fetching branch:', branchError)
+            return null
+        }
+
+        // Get financial data using P&L function
+        const { data: pnlData, error: pnlError } = await supabase.rpc('get_branch_pnl', {
+            p_branch: branchId,
+            p_start: null,
+            p_end: null
+        })
+
+        let total_income = 0
+        let total_expenses = 0
+        let monthly_revenue = 0
+
+        if (!pnlError && pnlData) {
+            const normalizedData = (pnlData as any[]).map((r: any) => ({
+                total_income: Number(r.total_income || 0),
+                total_expense: Number(r.total_expense || 0)
+            }))
+
+            total_income = normalizedData.reduce((sum, r) => sum + r.total_income, 0)
+            total_expenses = normalizedData.reduce((sum, r) => sum + r.total_expense, 0)
+
+            // Calculate monthly revenue (last 30 days)
+            const thirtyDaysAgo = new Date()
+            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+
+            // Filter data for last 30 days if we have date information
+            // For now, we'll approximate monthly revenue as 1/12 of total (can be improved)
+            monthly_revenue = Math.round(total_income / 12)
+        }
+
+        const net_profit = total_income - total_expenses
+
+        // Get member statistics (use start/end dates because membership_status column may not exist)
+        const { data: members, error: membersError } = await supabase
+            .from('members')
+            .select('id, membership_start_date, membership_end_date, created_at')
+            .eq('branch_id', branchId)
+
+        let total_members = 0
+        let active_members = 0
+        let inactive_members = 0
+        let pending_members = 0
+        let new_members_today = 0
+        let new_members_this_week = 0
+
+        if (!membersError && members) {
+            total_members = members.length
+
+            const now = new Date()
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+            const weekAgo = new Date(today)
+            weekAgo.setDate(weekAgo.getDate() - 7)
+
+            // active: start <= now (or no start) AND (no end OR end >= now)
+            active_members = members.filter((m: any) => {
+                const start = m.membership_start_date ? new Date(m.membership_start_date) : null
+                const end = m.membership_end_date ? new Date(m.membership_end_date) : null
+                const started = !start || start <= now
+                const notEnded = !end || end >= now
+                return started && notEnded
+            }).length
+
+            // pending: membership_start_date in future
+            pending_members = members.filter((m: any) => {
+                const start = m.membership_start_date ? new Date(m.membership_start_date) : null
+                return start && start > now
+            }).length
+
+            // inactive: ended before now
+            inactive_members = members.filter((m: any) => {
+                const end = m.membership_end_date ? new Date(m.membership_end_date) : null
+                return end && end < now
+            }).length
+
+            new_members_today = members.filter((m: any) => {
+                const createdDate = new Date(m.created_at)
+                return createdDate >= today
+            }).length
+
+            new_members_this_week = members.filter((m: any) => {
+                const createdDate = new Date(m.created_at)
+                return createdDate >= weekAgo
+            }).length
+        }
+
+        // Get plans count
+        const { data: plans, error: plansError } = await supabase
+            .from('plans')
+            .select('id, status')
+            .eq('branch_id', branchId)
+
+        let total_plans = 0
+        let active_plans = 0
+
+        if (!plansError && plans) {
+            total_plans = plans.length
+            active_plans = plans.filter(p => p.status === 'active').length
+        }
+
+        // Get recent payments and compute today's income (completed payments) and today's expenses via PnL RPC
+        const { data: paymentsAll, error: paymentsError } = await supabase
+            .from('payments')
+            .select('amount, status, created_at')
+            .eq('branch_id', branchId)
+
+        let todays_income = 0
+        let todays_expenses = 0
+
+        if (!paymentsError && paymentsAll) {
+            const now = new Date()
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+            const weekAgo = new Date(today)
+            weekAgo.setDate(weekAgo.getDate() - 7)
+
+            // Sum completed payments for today -> income
+            todays_income = (paymentsAll as any[]).reduce((sum, p) => {
+                const paymentDate = new Date(p.created_at)
+                if (p.status === 'completed' && paymentDate >= today) return sum + Number(p.amount || 0)
+                return sum
+            }, 0)
+        }
+
+        // Use P&L RPC to get today's expense total (if RPC supports date range)
+        try {
+            const now = new Date()
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+            const todayStart = today.toISOString().split('T')[0]
+            const todayEndDate = new Date(today)
+            todayEndDate.setHours(23, 59, 59, 999)
+            const todayEnd = todayEndDate.toISOString()
+
+            const { data: pnlToday, error: pnlTodayError } = await supabase.rpc('get_branch_pnl', {
+                p_branch: branchId,
+                p_start: todayStart,
+                p_end: todayEnd
+            })
+
+            if (!pnlTodayError && pnlToday && Array.isArray(pnlToday) && pnlToday.length > 0) {
+                // normalized row may contain total_expense
+                const row = pnlToday[0] as any
+                todays_expenses = Number(row.total_expense || 0)
+            } else if (pnlTodayError) {
+                console.error('Error fetching today PnL:', pnlTodayError)
+            }
+        } catch (err) {
+            console.error('Unexpected error fetching today PnL:', err)
+        }
+
+        return {
+            branch,
+            financials: {
+                total_income,
+                total_expenses,
+                net_profit,
+                monthly_revenue
+            },
+            members: {
+                total_members,
+                active_members,
+                inactive_members,
+                pending_members
+            },
+            plans: {
+                total_plans,
+                active_plans
+            },
+            recent_activity: {
+                new_members_today,
+                new_members_this_week,
+                todays_income,
+                todays_expenses
+            }
+        }
+    } catch (err) {
+        console.error('Unexpected error fetching branch dashboard data:', err)
+        return null
+    }
+}

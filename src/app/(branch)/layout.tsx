@@ -28,7 +28,6 @@ import { toast } from 'sonner'
 const navigation = [
     { name: 'Dashboard', href: '/branch/dashboard', icon: LayoutDashboard },
     { name: 'Operators', href: '/branch/operators', icon: Users },
-    { name: 'Payment History', href: '/branch/payment-history', icon: History },
     { name: 'Settings', href: '/branch/settings', icon: Settings },
 ]
 

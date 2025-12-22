@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import LinkCard from "@/components/ui/link-card"
-import { UserPlus, Users, IndianRupee, Settings } from "lucide-react"
+import { UserPlus, Users, IndianRupee, Settings, Wallet } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 
 export default function ReceptionDashboardPage() {
@@ -86,7 +86,7 @@ export default function ReceptionDashboardPage() {
 
     return (
         <div className="max-w-6xl mx-auto py-8 space-y-8">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
                 <LinkCard
                     href="/reception/enquiry"
                     title={`New Enquiry (${pendingCount})`}
@@ -109,6 +109,14 @@ export default function ReceptionDashboardPage() {
                     description="Collect fees and review recent payment activity."
                     icon={IndianRupee}
                     variant="green"
+                />
+
+                <LinkCard
+                    href="/reception/accounts"
+                    title="Accounts"
+                    description="View income, expenses and financial statements."
+                    icon={Wallet}
+                    variant="emerald"
                 />
 
                 <LinkCard

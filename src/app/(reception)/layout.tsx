@@ -15,6 +15,7 @@ import {
     X,
     UserPlus,
     ShieldCheck,
+    Wallet,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -26,6 +27,7 @@ const navigation = [
     { name: 'New Enquiry', href: '/reception/enquiry', icon: UserPlus },
     { name: 'Members List', href: '/reception/members', icon: Users },
     { name: 'Payments', href: '/reception/payments', icon: IndianRupee },
+    { name: 'Accounts', href: '/reception/accounts', icon: Wallet },
     { name: 'Settings', href: '/reception/settings', icon: Settings },
 ]
 
@@ -44,14 +46,14 @@ export default function ReceptionLayout({ children }: { children: React.ReactNod
             if (user) {
                 setUserName(user.user_metadata.full_name || 'Receptionist')
                 setBranchName(user.user_metadata.branch_name || 'My Branch')
-                
+
                 // Fetch user role from profiles table
                 const { data: profile } = await supabase
                     .from('profiles')
                     .select('role')
                     .eq('id', user.id)
                     .single()
-                
+
                 if (profile) {
                     setUserRole(profile.role)
                 }
@@ -168,7 +170,7 @@ export default function ReceptionLayout({ children }: { children: React.ReactNod
                                 <p className="text-xs text-stone-500 truncate uppercase">{branchName}</p>
                             </div>
                         </div>
-                        
+
                         {/* Sign Out Button */}
                         <Button
                             variant="outline"

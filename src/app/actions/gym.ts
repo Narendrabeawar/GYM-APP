@@ -120,3 +120,153 @@ export async function updateGym(prevState: ActionState, formData: FormData): Pro
         return { error: 'Something went wrong' }
     }
 }
+
+export interface BranchDashboardData {
+    id: string
+    name: string
+    address?: string
+    phone?: string
+    manager_name?: string
+    status: 'active' | 'inactive'
+    total_income: number
+    total_expenses: number
+    net_profit: number
+    member_count: number
+    active_members: number
+}
+
+export async function getGymDashboardData(gymId: string): Promise<{
+    branches: BranchDashboardData[]
+    summary: {
+        total_branches: number
+        total_income: number
+        total_expenses: number
+        total_profit: number
+        total_members: number
+        active_members: number
+    }
+} | null> {
+    if (!gymId) return null
+
+    const supabase = createAdminClient()
+
+    try {
+        // Get all branches for this gym
+        const { data: branches, error: branchesError } = await supabase
+            .from('branches')
+            .select('id, name, address, phone, manager_name, status')
+            .eq('gym_id', gymId)
+            .eq('status', 'active')
+            .order('name')
+
+        if (branchesError) {
+            console.error('Error fetching branches:', branchesError)
+            return null
+        }
+
+        if (!branches || branches.length === 0) {
+            return {
+                branches: [],
+                summary: {
+                    total_branches: 0,
+                    total_income: 0,
+                    total_expenses: 0,
+                    total_profit: 0,
+                    total_members: 0,
+                    active_members: 0
+                }
+            }
+        }
+
+        // Load all members for the gym once and group by branch to avoid per-branch queries
+        const { data: allMembers, error: allMembersError } = await supabase
+            .from('members')
+            .select('id, membership_start_date, membership_end_date, branch_id, gym_id')
+            .eq('gym_id', gymId)
+
+        if (allMembersError) {
+            console.error('Error fetching members for gym dashboard:', allMembersError)
+        }
+
+        const membersByBranch: Record<string, { id: string; membership_start_date?: string | null; membership_end_date?: string | null }[]> = {}
+        if (allMembers && Array.isArray(allMembers)) {
+            for (const m of allMembers as any[]) {
+                const bId = m.branch_id || '_unassigned'
+                if (!membersByBranch[bId]) membersByBranch[bId] = []
+                membersByBranch[bId].push({ id: m.id, membership_start_date: m.membership_start_date, membership_end_date: m.membership_end_date })
+            }
+        }
+
+        // Get financial data and member counts for each branch
+        const branchDataPromises = branches.map(async (branch) => {
+            // Get financial data using the existing P&L function
+            const { data: pnlData, error: pnlError } = await supabase.rpc('get_branch_pnl', {
+                p_branch: branch.id,
+                p_start: null, // Get all time data
+                p_end: null
+            })
+            // Get member counts from preloaded membersByBranch map
+            const members = membersByBranch[branch.id] || []
+
+            let total_income = 0
+            let total_expenses = 0
+            let member_count = 0
+            let active_members = 0
+
+            // Calculate financial totals
+            if (!pnlError && pnlData) {
+                const normalizedData = (pnlData as any[]).map((r: any) => ({
+                    total_income: Number(r.total_income || 0),
+                    total_expense: Number(r.total_expense || 0)
+                }))
+
+                total_income = normalizedData.reduce((sum, r) => sum + r.total_income, 0)
+                total_expenses = normalizedData.reduce((sum, r) => sum + r.total_expense, 0)
+            }
+
+            // Calculate member stats
+            if (members) {
+                member_count = members.length
+                // Determine active members based on membership_end_date (if present)
+                const now = new Date()
+                active_members = members.filter(m => {
+                    const end = m.membership_end_date ? new Date(m.membership_end_date) : null
+                    // if no end date, assume active; otherwise end date in future => active
+                    return !end || end >= now
+                }).length
+            }
+
+            const net_profit = total_income - total_expenses
+
+            return {
+                ...branch,
+                total_income,
+                total_expenses,
+                net_profit,
+                member_count,
+                active_members
+            } as BranchDashboardData
+        })
+
+        const branchData = await Promise.all(branchDataPromises)
+
+        // Calculate summary
+        const summary = {
+            total_branches: branchData.length,
+            total_income: branchData.reduce((sum, b) => sum + b.total_income, 0),
+            total_expenses: branchData.reduce((sum, b) => sum + b.total_expenses, 0),
+            total_profit: branchData.reduce((sum, b) => sum + b.net_profit, 0),
+            // use allMembers for gym-wide totals (includes unassigned members)
+            total_members: (allMembers && Array.isArray(allMembers)) ? allMembers.length : branchData.reduce((sum, b) => sum + b.member_count, 0),
+            active_members: (allMembers && Array.isArray(allMembers)) ? (allMembers as any[]).filter(m => m.membership_status === 'active' || m.membership_status === 'pending').length : branchData.reduce((sum, b) => sum + b.active_members, 0)
+        }
+
+        return {
+            branches: branchData,
+            summary
+        }
+    } catch (err) {
+        console.error('Unexpected error fetching gym dashboard data:', err)
+        return null
+    }
+}
