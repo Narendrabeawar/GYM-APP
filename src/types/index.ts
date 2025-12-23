@@ -85,8 +85,8 @@ export interface Employee {
 export interface EmployeeAttendance {
     id: string
     employee_id: string
-    check_in_time: string
-    check_out_time?: string
+    check_in_time?: string | null
+    check_out_time?: string | null
     date: string
     status: 'present' | 'absent' | 'late' | 'leave'
     created_at: string
