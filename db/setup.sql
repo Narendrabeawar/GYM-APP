@@ -153,8 +153,13 @@ CREATE TABLE IF NOT EXISTS public.members (
     weight DECIMAL(5, 2),
     fitness_goal VARCHAR(255),
     medical_conditions TEXT,
+    -- Emergency contact (legacy) kept for compatibility
     emergency_contact TEXT,
     emergency_phone TEXT,
+    -- New explicit emergency contact fields (preferred snake_case for API)
+    emergency_contact_name TEXT,
+    emergency_contact_phone TEXT,
+    emergency_contact_relationship TEXT,
     membership_plan_id UUID REFERENCES public.membership_plans(id) ON DELETE SET NULL,
     membership_start_date DATE,
     membership_end_date DATE,
@@ -787,6 +792,10 @@ ALTER TABLE public.members ADD COLUMN IF NOT EXISTS blood_group VARCHAR(10);
 ALTER TABLE public.members ADD COLUMN IF NOT EXISTS height DECIMAL(5, 2);
 ALTER TABLE public.members ADD COLUMN IF NOT EXISTS weight DECIMAL(5, 2);
 ALTER TABLE public.members ADD COLUMN IF NOT EXISTS fitness_goal VARCHAR(255);
+-- Add emergency contact columns to members table (safe for existing databases)
+ALTER TABLE public.members ADD COLUMN IF NOT EXISTS emergency_contact_name TEXT;
+ALTER TABLE public.members ADD COLUMN IF NOT EXISTS emergency_contact_phone TEXT;
+ALTER TABLE public.members ADD COLUMN IF NOT EXISTS emergency_contact_relationship TEXT;
 ALTER TABLE public.members ADD COLUMN IF NOT EXISTS medical_conditions TEXT;
 
 -- Add health columns to enquiries table (if not exists)
