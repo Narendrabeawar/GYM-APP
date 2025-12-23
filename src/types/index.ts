@@ -63,6 +63,36 @@ export interface Attendance {
     created_at: string
 }
 
+export interface Employee {
+    id: string
+    gym_id: string
+    branch_id: string
+    full_name: string
+    email?: string
+    phone: string
+    designation?: string
+    address?: string
+    date_of_birth?: string
+    gender?: 'male' | 'female' | 'other'
+    emergency_contact?: string
+    emergency_phone?: string
+    joining_date: string
+    status: 'active' | 'inactive' | 'terminated'
+    created_at: string
+    updated_at: string
+}
+
+export interface EmployeeAttendance {
+    id: string
+    employee_id: string
+    check_in_time: string
+    check_out_time?: string
+    date: string
+    status: 'present' | 'absent' | 'late' | 'leave'
+    created_at: string
+    updated_at: string
+}
+
 export interface Payment {
     id: string
     member_id: string

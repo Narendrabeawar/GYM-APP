@@ -237,6 +237,38 @@ CREATE TABLE IF NOT EXISTS public.payments (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
+-- 8.1 EMPLOYEES (Attendance System - Separate from login profiles)
+CREATE TABLE IF NOT EXISTS public.employees (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    gym_id UUID REFERENCES public.gyms(id) ON DELETE CASCADE,
+    branch_id UUID REFERENCES public.branches(id) ON DELETE CASCADE,
+    full_name TEXT NOT NULL,
+    email TEXT,
+    phone TEXT NOT NULL,
+    designation TEXT,
+    address TEXT,
+    date_of_birth DATE,
+    gender TEXT CHECK (gender IN ('male', 'female', 'other')),
+    emergency_contact TEXT,
+    emergency_phone TEXT,
+    joining_date DATE DEFAULT CURRENT_DATE,
+    status TEXT CHECK (status IN ('active', 'inactive', 'terminated')) DEFAULT 'active',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 8.2 EMPLOYEE ATTENDANCE
+CREATE TABLE IF NOT EXISTS public.employee_attendance (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    employee_id UUID REFERENCES public.employees(id) ON DELETE CASCADE,
+    check_in_time TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    check_out_time TIMESTAMP WITH TIME ZONE,
+    date DATE DEFAULT CURRENT_DATE NOT NULL,
+    status TEXT CHECK (status IN ('present', 'absent', 'late', 'leave')) DEFAULT 'present',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
 -- ==========================================
 -- 🔐 ROW LEVEL SECURITY (RLS)
 -- ==========================================
@@ -498,7 +530,7 @@ DO $$
 DECLARE
     target_table TEXT;
 BEGIN
-    FOR target_table IN VALUES ('members'), ('trainers'), ('membership_plans'), ('attendance'), ('payments'), ('enquiries'), ('branches')
+    FOR target_table IN VALUES ('members'), ('trainers'), ('membership_plans'), ('attendance'), ('employees'), ('payments'), ('enquiries'), ('branches')
     LOOP
         -- Admin: Can do everything
         IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = target_table AND policyname = 'Admins have full access') THEN
@@ -520,7 +552,7 @@ DO $$
 DECLARE
     target_table TEXT;
 BEGIN
-    FOR target_table IN VALUES ('members'), ('trainers'), ('attendance'), ('payments'), ('enquiries')
+    FOR target_table IN VALUES ('members'), ('trainers'), ('attendance'), ('employees'), ('payments'), ('enquiries')
     LOOP
         -- Add branch_id column to tables if not exists for better isolation
         EXECUTE 'ALTER TABLE public.' || target_table || ' ADD COLUMN IF NOT EXISTS branch_id UUID REFERENCES public.branches(id) ON DELETE SET NULL';
@@ -567,6 +599,19 @@ DO $$ BEGIN
                 WHERE id = auth.uid()
                 AND role IN ('admin', 'gym_admin', 'branch_admin', 'receptionist')
                 AND gym_id = public.members.gym_id
+            )
+        );
+    END IF;
+
+    -- Create specific policies for employee_attendance (no direct gym_id column)
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'employee_attendance' AND policyname = 'Gym staff can manage employee attendance') THEN
+        CREATE POLICY "Gym staff can manage employee attendance" ON public.employee_attendance FOR ALL USING (
+            EXISTS (
+                SELECT 1 FROM public.profiles p
+                JOIN public.employees e ON p.gym_id = e.gym_id
+                WHERE p.id = auth.uid()
+                AND p.role IN ('admin', 'gym_admin', 'branch_admin', 'receptionist')
+                AND e.id = public.employee_attendance.employee_id
             )
         );
     END IF;

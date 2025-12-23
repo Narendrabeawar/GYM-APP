@@ -27,6 +27,7 @@ import { toast } from 'sonner'
 
 const navigation = [
     { name: 'Dashboard', href: '/branch/dashboard', icon: LayoutDashboard },
+    { name: 'Employee', href: '/branch/employee', icon: Calendar },
     { name: 'Operators', href: '/branch/operators', icon: Users },
     { name: 'Settings', href: '/branch/settings', icon: Settings },
 ]
