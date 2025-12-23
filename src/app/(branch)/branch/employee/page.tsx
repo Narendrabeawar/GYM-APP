@@ -20,8 +20,7 @@ import {
     Trash2,
     BarChart3,
 } from 'lucide-react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { DataTable } from '@/components/ui/data-table'
@@ -33,9 +32,19 @@ import {
     DropdownMenuLabel,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { createClient } from '@/lib/supabase/client'
 import { checkInEmployee, checkOutEmployee, markEmployeeAbsent, markEmployeeOnLeave, getTodayAttendanceStats, getEmployeesWithAttendance, type EmployeeAttendance } from '@/app/actions/employee-attendance'
+import { deleteEmployee } from '@/app/actions/employee'
 import AddEmployeeForm from '@/components/AddEmployeeForm'
 import ResultDialog from '@/components/ResultDialog'
 
@@ -68,25 +77,22 @@ export default function BranchEmployeePage() {
     const [createDialogOpen, setCreateDialogOpen] = useState(false)
     const [editDialogOpen, setEditDialogOpen] = useState(false)
     const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null)
+    const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false)
+    const [finalDeleteConfirmationOpen, setFinalDeleteConfirmationOpen] = useState(false)
+    const [employeeToDelete, setEmployeeToDelete] = useState<Employee | null>(null)
     const [gymId, setGymId] = useState<string | null>(null)
     const [branchId, setBranchId] = useState<string | null>(null)
-    const [resultDialog, setResultDialog] = useState<{
-        open: boolean
-        type: 'success' | 'error'
-        title: string
-        description?: string
-    }>({
-        open: false,
-        type: 'success',
-        title: '',
-        description: ''
-    })
+    const [resultDialogOpen, setResultDialogOpen] = useState(false)
+    const [resultDialogType, setResultDialogType] = useState<'success' | 'error' | 'warning' | 'loading'>('success')
+    const [resultDialogTitle, setResultDialogTitle] = useState('')
+    const [resultDialogDescription, setResultDialogDescription] = useState<string | undefined>('')
 
     const router = useRouter()
 
 
 
     // Table columns definition
+    /* eslint-disable react-hooks/preserve-manual-memoization */
     const columns = useMemo<ColumnDef<Employee>[]>(() => [
         {
             header: 'Sr.No.',
@@ -280,7 +286,10 @@ export default function BranchEmployeePage() {
                                 <Edit className="w-4 h-4" />
                                 Edit Details
                             </DropdownMenuItem>
-                            <DropdownMenuItem className="cursor-pointer flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-red-50 text-red-600 focus:text-red-700 font-medium transition-colors">
+                            <DropdownMenuItem
+                                onClick={() => initiateDeleteEmployee(employee)}
+                                className="cursor-pointer flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-red-50 text-red-600 focus:text-red-700 font-medium transition-colors"
+                            >
                                 <Trash2 className="w-4 h-4" />
                                 Delete Employee
                             </DropdownMenuItem>
@@ -344,89 +353,105 @@ export default function BranchEmployeePage() {
     const handleCheckIn = async (employeeId: string) => {
         const result = await checkInEmployee(employeeId)
         if (result.success) {
-            setResultDialog({
-                open: true,
-                type: 'success',
-                title: 'Check-in Successful!',
-                description: result.message
-            })
+            setResultDialogType('success')
+            setResultDialogTitle('Check-in Successful!')
+            setResultDialogDescription(result.message)
+            setResultDialogOpen(true)
             if (branchId) {
                 fetchEmployees(branchId)
             }
         } else {
-            setResultDialog({
-                open: true,
-                type: 'error',
-                title: 'Check-in Failed',
-                description: result.error
-            })
+            setResultDialogType('error')
+            setResultDialogTitle('Check-in Failed')
+            setResultDialogDescription(result.error)
+            setResultDialogOpen(true)
         }
     }
 
     const handleCheckOut = async (employeeId: string) => {
         const result = await checkOutEmployee(employeeId)
         if (result.success) {
-            setResultDialog({
-                open: true,
-                type: 'success',
-                title: 'Check-out Successful!',
-                description: result.message
-            })
+            setResultDialogType('success')
+            setResultDialogTitle('Check-out Successful!')
+            setResultDialogDescription(result.message)
+            setResultDialogOpen(true)
             if (branchId) {
                 fetchEmployees(branchId)
             }
         } else {
-            setResultDialog({
-                open: true,
-                type: 'error',
-                title: 'Check-out Failed',
-                description: result.error
-            })
+            setResultDialogType('error')
+            setResultDialogTitle('Check-out Failed')
+            setResultDialogDescription(result.error)
+            setResultDialogOpen(true)
         }
     }
 
     const handleMarkAbsent = async (employeeId: string) => {
         const result = await markEmployeeAbsent(employeeId)
         if (result.success) {
-            setResultDialog({
-                open: true,
-                type: 'success',
-                title: 'Marked as Absent',
-                description: result.message
-            })
+            setResultDialogType('success')
+            setResultDialogTitle('Marked as Absent')
+            setResultDialogDescription(result.message)
+            setResultDialogOpen(true)
             if (branchId) {
                 fetchEmployees(branchId)
             }
         } else {
-            setResultDialog({
-                open: true,
-                type: 'error',
-                title: 'Failed to Mark Absent',
-                description: result.error
-            })
+            setResultDialogType('error')
+            setResultDialogTitle('Failed to Mark Absent')
+            setResultDialogDescription(result.error)
+            setResultDialogOpen(true)
         }
     }
 
     const handleMarkOnLeave = async (employeeId: string) => {
         const result = await markEmployeeOnLeave(employeeId)
         if (result.success) {
-            setResultDialog({
-                open: true,
-                type: 'success',
-                title: 'Marked as On Leave',
-                description: result.message
-            })
+            setResultDialogType('success')
+            setResultDialogTitle('Marked as On Leave')
+            setResultDialogDescription(result.message)
+            setResultDialogOpen(true)
             if (branchId) {
                 fetchEmployees(branchId)
             }
         } else {
-            setResultDialog({
-                open: true,
-                type: 'error',
-                title: 'Failed to Mark On Leave',
-                description: result.error || 'Unable to mark employee as on leave. Please try again or contact support.'
-            })
+            setResultDialogType('error')
+            setResultDialogTitle('Failed to Mark On Leave')
+            setResultDialogDescription(result.error || 'Unable to mark employee as on leave. Please try again or contact support.')
+            setResultDialogOpen(true)
         }
+    }
+
+    const handleDeleteEmployee = async (employeeId: string) => {
+        const result = await deleteEmployee(employeeId)
+        if (result.success) {
+            setResultDialogType('success')
+            setResultDialogTitle('Employee Deleted Successfully!')
+            setResultDialogDescription(result.message)
+            setResultDialogOpen(true)
+            setFinalDeleteConfirmationOpen(false)
+            setEmployeeToDelete(null)
+            if (branchId) {
+                fetchEmployees(branchId)
+            }
+        } else {
+            setResultDialogType('error')
+            setResultDialogTitle('Failed to Delete Employee')
+            setResultDialogDescription(result.error || 'Unable to delete employee. Please try again or contact support.')
+            setResultDialogOpen(true)
+            setFinalDeleteConfirmationOpen(false)
+            setEmployeeToDelete(null)
+        }
+    }
+
+    const initiateDeleteEmployee = (employee: Employee) => {
+        setEmployeeToDelete(employee)
+        setDeleteConfirmationOpen(true)
+    }
+
+    const confirmFirstDelete = () => {
+        setDeleteConfirmationOpen(false)
+        setFinalDeleteConfirmationOpen(true)
     }
 
 
@@ -520,7 +545,7 @@ export default function BranchEmployeePage() {
                         <div className="text-center py-20">
                             <Users className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
                             <p className="text-muted-foreground text-lg">No employees found</p>
-                            <p className="text-sm text-muted-foreground mt-2">Add your first employee using the "Add Employee" button</p>
+                            <p className="text-sm text-muted-foreground mt-2">Add your first employee using the &ldquo;Add Employee&rdquo; button</p>
                         </div>
                     ) : (
                         <DataTable columns={columns} data={employees} />
@@ -533,7 +558,17 @@ export default function BranchEmployeePage() {
                 onOpenChange={setCreateDialogOpen}
                 gymId={gymId}
                 branchId={branchId}
-                onSuccess={() => fetchEmployees(branchId!)}
+                onSuccess={() => {
+                    // close create modal, show success and refresh list
+                    setCreateDialogOpen(false)
+                    setResultDialogType('success')
+                    setResultDialogTitle('Employee Created Successfully!')
+                    setResultDialogDescription('The new employee has been added.')
+                    setResultDialogOpen(true)
+                    if (branchId) {
+                        fetchEmployees(branchId)
+                    }
+                }}
             />
 
             {/* Edit Employee Form */}
@@ -556,12 +591,10 @@ export default function BranchEmployeePage() {
                     emergency_phone: editingEmployee.emergency_phone
                 } : null}
                 onSuccess={() => {
-                    setResultDialog({
-                        open: true,
-                        type: 'success',
-                        title: 'Employee Updated Successfully!',
-                        description: 'Employee information has been updated.'
-                    })
+                    setResultDialogType('success')
+                    setResultDialogTitle('Employee Updated Successfully!')
+                    setResultDialogDescription('Employee information has been updated.')
+                    setResultDialogOpen(true)
                     fetchEmployees(branchId!)
                     setEditingEmployee(null)
                     setEditDialogOpen(false)
@@ -570,14 +603,86 @@ export default function BranchEmployeePage() {
 
             {/* Result Dialog for Check-in/Check-out */}
             <ResultDialog
-                open={resultDialog.open}
-                onOpenChange={(open) => setResultDialog(prev => ({ ...prev, open }))}
-                type={resultDialog.type}
-                title={resultDialog.title}
-                description={resultDialog.description}
+                open={resultDialogOpen}
+                onOpenChange={setResultDialogOpen}
+                type={resultDialogType}
+                title={resultDialogTitle}
+                description={resultDialogDescription}
                 actionText="Continue"
-                autoClose={resultDialog.type === 'success'}
+                autoClose={resultDialogType === 'success'}
             />
+
+            {/* First Delete Confirmation Dialog */}
+            <AlertDialog open={deleteConfirmationOpen} onOpenChange={setDeleteConfirmationOpen}>
+                <AlertDialogContent className="bg-white border-2 border-red-200 shadow-2xl rounded-2xl max-w-md">
+                    <AlertDialogHeader className="text-center">
+                        <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                            <Trash2 className="w-8 h-8 text-red-600" />
+                        </div>
+                        <AlertDialogTitle className="text-xl font-bold text-gray-900">
+                            Delete Employee
+                        </AlertDialogTitle>
+                        <AlertDialogDescription className="text-gray-600 text-base leading-relaxed">
+                            Are you sure you want to delete <span className="font-semibold text-red-600">{employeeToDelete?.full_name}</span>?
+                            <br />
+                            This action cannot be undone.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter className="flex gap-3 pt-6">
+                        <AlertDialogCancel
+                            className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 border-0 rounded-xl py-3 font-medium transition-colors"
+                            onClick={() => {
+                                setDeleteConfirmationOpen(false)
+                                setEmployeeToDelete(null)
+                            }}
+                        >
+                            Cancel
+                        </AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={confirmFirstDelete}
+                            className="flex-1 bg-red-600 hover:bg-red-700 text-white border-0 rounded-xl py-3 font-medium transition-colors"
+                        >
+                            Yes, Delete
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
+            {/* Final Delete Confirmation Dialog */}
+            <AlertDialog open={finalDeleteConfirmationOpen} onOpenChange={setFinalDeleteConfirmationOpen}>
+                <AlertDialogContent className="bg-white border-2 border-red-200 shadow-2xl rounded-2xl max-w-md">
+                    <AlertDialogHeader className="text-center">
+                        <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                            <Trash2 className="w-8 h-8 text-red-600 animate-pulse" />
+                        </div>
+                        <AlertDialogTitle className="text-xl font-bold text-gray-900">
+                            Final Confirmation
+                        </AlertDialogTitle>
+                        <AlertDialogDescription className="text-gray-600 text-base leading-relaxed">
+                            I am about to perform the final delete of <span className="font-semibold text-red-600">{employeeToDelete?.full_name}</span>.
+                            <br />
+                            <span className="font-semibold text-red-700">This action is irreversible!</span>
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter className="flex gap-3 pt-6">
+                        <AlertDialogCancel
+                            className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 border-0 rounded-xl py-3 font-medium transition-colors"
+                            onClick={() => {
+                                setFinalDeleteConfirmationOpen(false)
+                                setEmployeeToDelete(null)
+                            }}
+                        >
+                            Cancel
+                        </AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={() => employeeToDelete && handleDeleteEmployee(employeeToDelete.id)}
+                            className="flex-1 bg-red-700 hover:bg-red-800 text-white border-0 rounded-xl py-3 font-medium transition-colors"
+                        >
+                            Final Delete
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     )
 }

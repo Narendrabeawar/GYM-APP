@@ -49,6 +49,36 @@ export async function createEmployee(prevState: EmployeeActionState, formData: F
     const supabase = createAdminClient()
 
     try {
+        // If a designation name is provided, ensure it exists in the designations table for this branch
+        if (designation && branchId) {
+            try {
+                const { data: existingDesignation, error: selectErr } = await supabase
+                    .from('designations')
+                    .select('id')
+                    .eq('branch_id', branchId)
+                    .eq('name', designation)
+                    .limit(1)
+                    .maybeSingle()
+
+                if (selectErr) {
+                    console.error('Error checking existing designation:', selectErr)
+                } else if (!existingDesignation) {
+                    const { error: insertDesErr } = await supabase
+                        .from('designations')
+                        .insert({
+                            gym_id: gymId,
+                            branch_id: branchId,
+                            name: designation
+                        })
+
+                    if (insertDesErr) {
+                        console.error('Error inserting designation:', insertDesErr)
+                    }
+                }
+            } catch (desErr: any) {
+                console.error('Fatal designation upsert error:', desErr)
+            }
+        }
         // Create the employee record
         const { data: employee, error: employeeError } = await supabase
             .from('employees')

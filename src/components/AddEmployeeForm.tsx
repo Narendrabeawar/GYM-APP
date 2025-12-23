@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useActionState, useState } from 'react'
+import React, { useActionState, useState, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -16,6 +16,7 @@ import {
 import { Card, CardContent } from '@/components/ui/card'
 import { Loader2, UserPlus, X, User, Phone, Mail, MapPin, Calendar, Heart, Shield, Plus } from 'lucide-react'
 import { createEmployee, updateEmployee, type EmployeeActionState } from '@/app/actions/employee'
+import { createClient } from '@/lib/supabase/client'
 
 const initialState: EmployeeActionState = {
     message: '',
@@ -56,14 +57,60 @@ export default function AddEmployeeForm({
     const [state, formAction, isPending] = useActionState(createEmployee, initialState)
     const [showCustomDesignation, setShowCustomDesignation] = useState(false)
     const [customDesignation, setCustomDesignation] = useState('')
+    const [savingDesignation, setSavingDesignation] = useState(false)
+    const [selectedDesignation, setSelectedDesignation] = useState<string | undefined>(editMode ? employeeData?.designation || undefined : undefined)
+    const [designationsList, setDesignationsList] = useState<string[]>([])
 
-    // Handle success state
+    // Load designations for this branch to populate dropdown
     React.useEffect(() => {
-        if (state.success) {
-            console.log('Form success:', state.message, 'Edit mode:', editMode)
-            onSuccess?.()
+        if (!branchId) return
+        const load = async () => {
+            try {
+                const client = createClient()
+                const { data, error } = await client
+                    .from('designations')
+                    .select('name')
+                    .eq('branch_id', branchId)
+                    .order('name', { ascending: true })
+
+                if (error) {
+                    console.error('Error fetching designations:', error)
+                    return
+                }
+                if (data) {
+                    setDesignationsList(data.map((d: any) => d.name))
+                } else {
+                    setDesignationsList([])
+                }
+            } catch (err) {
+                console.error('Fatal error loading designations:', err)
+            }
         }
-    }, [state.success, state.message, onSuccess, editMode])
+        load()
+    }, [branchId])
+
+    // Handle success state (guard so onSuccess runs only once per successful submit)
+    const successHandledRef = useRef(false)
+    React.useEffect(() => {
+        if (state.success && !successHandledRef.current) {
+            successHandledRef.current = true
+            console.log('Form success:', state.message, 'Edit mode:', editMode)
+            // If a custom designation was created, add it to local list so dropdown can reuse immediately
+            if (showCustomDesignation && customDesignation) {
+                setDesignationsList((prev) => {
+                    if (!prev.includes(customDesignation)) return [...prev, customDesignation]
+                    return prev
+                })
+            }
+            onSuccess?.()
+            // close the modal locally as well to avoid race where parent takes longer
+            onOpenChange(false)
+        }
+        if (!state.success) {
+            // reset guard when not in success state
+            successHandledRef.current = false
+        }
+    }, [state.success, state.message, onSuccess, editMode, onOpenChange])
 
     return (
         <AnimatePresence>
@@ -154,6 +201,8 @@ export default function AddEmployeeForm({
                                             {editMode && employeeData?.id && (
                                                 <input type="hidden" name="employeeId" value={employeeData.id} />
                                             )}
+                                            {/* Hidden designation value (selected or custom) */}
+                                            <input type="hidden" name="designation" value={showCustomDesignation ? customDesignation : (selectedDesignation || '')} />
 
                                             {/* Personal Information Section */}
                                             <motion.div
@@ -237,36 +286,46 @@ export default function AddEmployeeForm({
                                                                 Designation
                                                             </Label>
                                                             <motion.div whileFocus={{ scale: 1.02 }}>
-                                                                <Select
-                                                                    name={showCustomDesignation ? "" : "designation"}
-                                                                    value={showCustomDesignation ? "other" : (editMode ? employeeData?.designation || "Employee" : undefined)}
-                                                                    onValueChange={(value) => {
-                                                                        if (value === "other") {
-                                                                            setShowCustomDesignation(true)
-                                                                            setCustomDesignation(editMode ? employeeData?.designation || '' : '')
-                                                                        } else {
+                                                                <div className="flex items-center gap-3">
+                                                                    <Select
+                                                                        name="designationSelect"
+                                                                        value={selectedDesignation ?? (editMode ? employeeData?.designation || undefined : undefined)}
+                                                                        onValueChange={(value) => {
                                                                             setShowCustomDesignation(false)
                                                                             setCustomDesignation('')
-                                                                        }
-                                                                    }}
-                                                                >
-                                                                    <SelectTrigger className="pl-4 pr-4 py-3 border-2 border-gray-200 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/20 bg-white/80 backdrop-blur-sm rounded-xl text-gray-800 h-auto">
-                                                                        <SelectValue placeholder="Select designation" />
-                                                                    </SelectTrigger>
-                                                                    <SelectContent className="z-[90] bg-white/95 backdrop-blur-xl border-2 border-gray-200">
-                                                                        <SelectItem value="Receptionist" className="hover:bg-emerald-50 focus:bg-emerald-50">Receptionist</SelectItem>
-                                                                        <SelectItem value="Trainer" className="hover:bg-emerald-50 focus:bg-emerald-50">Trainer</SelectItem>
-                                                                        <SelectItem value="Manager" className="hover:bg-emerald-50 focus:bg-emerald-50">Manager</SelectItem>
-                                                                        <SelectItem value="Cleaner" className="hover:bg-emerald-50 focus:bg-emerald-50">Cleaner</SelectItem>
-                                                                        <SelectItem value="Security" className="hover:bg-emerald-50 focus:bg-emerald-50">Security</SelectItem>
-                                                                        <SelectItem value="Cashier" className="hover:bg-emerald-50 focus:bg-emerald-50">Cashier</SelectItem>
-                                                                        <SelectItem value="Maintenance" className="hover:bg-emerald-50 focus:bg-emerald-50">Maintenance</SelectItem>
-                                                                        <SelectItem value="other" className="hover:bg-emerald-50 focus:bg-emerald-50 flex items-center gap-2">
-                                                                            <Plus className="w-4 h-4" />
-                                                                            Create New Designation
-                                                                        </SelectItem>
-                                                                    </SelectContent>
-                                                                </Select>
+                                                                            setSelectedDesignation(value)
+                                                                        }}
+                                                                    >
+                                                                        <SelectTrigger className="pl-4 pr-4 py-3 border-2 border-gray-200 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/20 bg-white/80 backdrop-blur-sm rounded-xl text-gray-800 h-auto min-w-[200px]">
+                                                                            <SelectValue placeholder="Select designation" />
+                                                                        </SelectTrigger>
+                                                                        <SelectContent className="z-[90] bg-white/95 backdrop-blur-xl border-2 border-gray-200">
+                                                                            {designationsList.length > 0 ? (
+                                                                                designationsList.map((d) => (
+                                                                                    <SelectItem key={d} value={d} className="hover:bg-emerald-50 focus:bg-emerald-50">{d}</SelectItem>
+                                                                                ))
+                                                                            ) : (
+                                                                            <SelectItem value="no-designations" disabled className="text-muted-foreground">
+                                                                                No saved designations — create one
+                                                                            </SelectItem>
+                                                                            )}
+                                                                        </SelectContent>
+                                                                    </Select>
+
+                                                                    <Button
+                                                                        type="button"
+                                                                        variant="outline"
+                                                                        onClick={() => {
+                                                                            setShowCustomDesignation(true)
+                                                                            setCustomDesignation(editMode ? employeeData?.designation || '' : '')
+                                                                            setSelectedDesignation(undefined)
+                                                                        }}
+                                                                        className="px-3 py-2 h-auto flex items-center gap-2 rounded-xl"
+                                                                    >
+                                                                        <Plus className="w-4 h-4" />
+                                                                        Create New
+                                                                    </Button>
+                                                                </div>
                                                             </motion.div>
 
                                                             {/* Custom Designation Input */}
@@ -288,13 +347,57 @@ export default function AddEmployeeForm({
                                                                             <Label className="text-sm font-medium text-slate-700">
                                                                                 Custom Designation
                                                                             </Label>
-                                                                            <Input
-                                                                                name="designation"
-                                                                                value={customDesignation}
-                                                                                onChange={(e) => setCustomDesignation(e.target.value)}
-                                                                                placeholder="Enter custom designation"
-                                                                                className="pl-4 pr-4 py-3 border-2 border-gray-200 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/20 bg-white/80 backdrop-blur-sm rounded-xl text-gray-800"
-                                                                            />
+                                                                            <div className="flex items-center gap-3">
+                                                                                <Input
+                                                                                    value={customDesignation}
+                                                                                    onChange={(e) => setCustomDesignation(e.target.value)}
+                                                                                    placeholder="Enter custom designation"
+                                                                                    className="pl-4 pr-4 py-3 border-2 border-gray-200 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/20 bg-white/80 backdrop-blur-sm rounded-xl text-gray-800 max-w-[420px]"
+                                                                                />
+                                                                                <Button
+                                                                                    type="button"
+                                                                                    variant="outline"
+                                                                                    onClick={async () => {
+                                                                                        if (!customDesignation.trim() || savingDesignation) return
+                                                                                        try {
+                                                                                            setSavingDesignation(true)
+                                                                                            const client = createClient()
+                                                                                            const insertPayload: any = {
+                                                                                                name: customDesignation.trim()
+                                                                                            }
+                                                                                            if (gymId) insertPayload.gym_id = gymId
+                                                                                            if (branchId) insertPayload.branch_id = branchId
+                                                                                            const { data: inserted, error: insertErr } = await client
+                                                                                                .from('designations')
+                                                                                                .insert(insertPayload)
+                                                                                                .select()
+                                                                                                .limit(1)
+                                                                                                .maybeSingle()
+
+                                                                                            if (insertErr) {
+                                                                                                console.error('Error inserting designation:', insertErr)
+                                                                                            } else if (inserted) {
+                                                                                                // update local list and select the new designation
+                                                                                                setDesignationsList((prev) => {
+                                                                                                    if (!prev.includes(inserted.name)) return [...prev, inserted.name]
+                                                                                                    return prev
+                                                                                                })
+                                                                                                setSelectedDesignation(inserted.name)
+                                                                                                setShowCustomDesignation(false)
+                                                                                                setCustomDesignation('')
+                                                                                            }
+                                                                                        } catch (err) {
+                                                                                            console.error('Fatal error saving designation:', err)
+                                                                                        } finally {
+                                                                                            setSavingDesignation(false)
+                                                                                        }
+                                                                                    }}
+                                                                                    className="px-4 py-2 h-auto flex items-center gap-2 rounded-xl"
+                                                                                    disabled={savingDesignation}
+                                                                                >
+                                                                                    {savingDesignation ? 'Saving...' : 'Save'}
+                                                                                </Button>
+                                                                            </div>
                                                                         </motion.div>
                                                                     </motion.div>
                                                                 )}

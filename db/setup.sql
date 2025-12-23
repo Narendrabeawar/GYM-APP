@@ -264,6 +264,17 @@ CREATE TABLE IF NOT EXISTS public.employees (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
+-- 8.3 DESIGNATIONS
+-- Used to store reusable designations for employees per gym
+CREATE TABLE IF NOT EXISTS public.designations (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    gym_id UUID REFERENCES public.gyms(id) ON DELETE CASCADE,
+    branch_id UUID REFERENCES public.branches(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    UNIQUE (branch_id, name)
+);
+
 -- 8.2 EMPLOYEE ATTENDANCE
 CREATE TABLE IF NOT EXISTS public.employee_attendance (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
@@ -627,13 +638,25 @@ END $$;
 -- BRANCH SPECIFIC POLICIES
 DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Branch admins can view their own branch') THEN
-        CREATE POLICY "Branch admins can view their own branch" ON public.branches 
+        CREATE POLICY "Branch admins can view their own branch" ON public.branches
         FOR SELECT USING (
             EXISTS (
-                SELECT 1 FROM public.profiles 
-                WHERE id = auth.uid() 
-                AND role = 'branch_admin' 
+                SELECT 1 FROM public.profiles
+                WHERE id = auth.uid()
+                AND role = 'branch_admin'
                 AND branch_id = public.branches.id
+            )
+        );
+    END IF;
+
+    -- Create branch-based policy for designations
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'designations' AND policyname = 'Gym staff can manage designations') THEN
+        CREATE POLICY "Gym staff can manage designations" ON public.designations FOR ALL USING (
+            EXISTS (
+                SELECT 1 FROM public.profiles
+                WHERE id = auth.uid()
+                AND role IN ('admin', 'gym_admin', 'branch_admin', 'receptionist')
+                AND branch_id = public.designations.branch_id
             )
         );
     END IF;
@@ -870,3 +893,12 @@ ALTER TABLE enquiries ADD COLUMN IF NOT EXISTS gender TEXT CHECK (gender IN ('ma
 -- Add comments to document the new columns
 COMMENT ON COLUMN enquiries.date_of_birth IS 'Date of birth for enquiry personal information';
 COMMENT ON COLUMN enquiries.gender IS 'Gender selection: male, female, or other';
+
+-- Migration: Add gym_id column to designations table
+ALTER TABLE designations ADD COLUMN IF NOT EXISTS gym_id UUID REFERENCES public.gyms(id) ON DELETE CASCADE;
+
+-- Populate gym_id for existing designations based on branch_id
+UPDATE designations
+SET gym_id = branches.gym_id
+FROM branches
+WHERE designations.branch_id = branches.id AND designations.gym_id IS NULL;
