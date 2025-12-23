@@ -19,6 +19,7 @@ import {
     Edit,
     Trash2,
     BarChart3,
+    PauseCircle,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -70,7 +71,7 @@ export default function BranchEmployeePage() {
         { name: 'Today Present', value: '0', icon: CheckCircle2, color: 'text-green-600', bg: 'bg-green-50', percentage: '0%' },
         { name: 'Total Employees', value: '0', icon: Users, color: 'text-blue-600', bg: 'bg-blue-50', percentage: '100%' },
         { name: 'Absent Today', value: '0', icon: XCircle, color: 'text-red-600', bg: 'bg-red-50', percentage: '0%' },
-        { name: 'Avg Attendance', value: '0%', icon: UserCheck, color: 'text-emerald-600', bg: 'bg-emerald-50', percentage: '0%' },
+        { name: "Today's On Leave", value: '0', icon: PauseCircle, color: 'text-orange-600', bg: 'bg-orange-50', percentage: '0%' },
     ])
     const [employees, setEmployees] = useState<Employee[]>([])
     const [isLoading, setIsLoading] = useState(true)
@@ -185,6 +186,21 @@ export default function BranchEmployeePage() {
                     <Badge className="bg-gray-100 text-gray-700 hover:bg-gray-200 border-gray-200">
                         Not Checked In
                     </Badge>
+                )
+            },
+        },
+        {
+            id: 'check_in_time',
+            header: 'Check-in',
+            cell: ({ row }) => {
+                const employee = row.original as Employee
+                const checkIn = employee.today_attendance?.check_in_time
+                return checkIn ? (
+                    <div className="text-sm font-medium text-stone-700">
+                        {new Date(checkIn).toLocaleTimeString()}
+                    </div>
+                ) : (
+                    <div className="text-sm text-muted-foreground">-</div>
                 )
             },
         },
@@ -332,12 +348,12 @@ export default function BranchEmployeePage() {
                 percentage: stats.totalEmployees > 0 ? `${Math.round((stats.absentToday / stats.totalEmployees) * 100)}%` : '0%'
             },
             {
-                name: 'Currently In Office',
-                value: stats.checkedInNow.toString(),
-                icon: CheckCircle2,
-                color: 'text-emerald-600',
-                bg: 'bg-emerald-50',
-                percentage: stats.presentToday > 0 ? `${Math.round((stats.checkedInNow / stats.presentToday) * 100)}%` : '0%'
+                name: "Today's On Leave",
+                value: stats.onLeaveToday.toString(),
+                icon: PauseCircle,
+                color: 'text-orange-600',
+                bg: 'bg-orange-50',
+                percentage: stats.totalEmployees > 0 ? `${Math.round((stats.onLeaveToday / stats.totalEmployees) * 100)}%` : '0%'
             },
         ])
     }, [])
@@ -353,10 +369,30 @@ export default function BranchEmployeePage() {
     const handleCheckIn = async (employeeId: string) => {
         const result = await checkInEmployee(employeeId)
         if (result.success) {
+            // Optimistic UI update: set employee as present with check_in_time now
+            const now = new Date().toISOString()
+            setEmployees(prev => prev.map(emp => {
+                if (emp.id !== employeeId) return emp
+                return {
+                    ...emp,
+                    today_attendance: {
+                        id: emp.today_attendance?.id || 'temp-' + employeeId,
+                        employee_id: employeeId,
+                        check_in_time: now,
+                        check_out_time: null,
+                        date: new Date().toISOString().split('T')[0],
+                        status: 'present',
+                        created_at: emp.today_attendance?.created_at || now,
+                        updated_at: now
+                    }
+                }
+            }))
+
             setResultDialogType('success')
             setResultDialogTitle('Check-in Successful!')
             setResultDialogDescription(result.message)
             setResultDialogOpen(true)
+            // Refresh server data to ensure final state is synced
             if (branchId) {
                 fetchEmployees(branchId)
             }
@@ -371,10 +407,30 @@ export default function BranchEmployeePage() {
     const handleCheckOut = async (employeeId: string) => {
         const result = await checkOutEmployee(employeeId)
         if (result.success) {
+            // Optimistic UI update: set check_out_time now while keeping existing check_in_time
+            const now = new Date().toISOString()
+            setEmployees(prev => prev.map(emp => {
+                if (emp.id !== employeeId) return emp
+                return {
+                    ...emp,
+                    today_attendance: {
+                        id: emp.today_attendance?.id || 'temp-' + employeeId,
+                        employee_id: employeeId,
+                        check_in_time: emp.today_attendance?.check_in_time || null,
+                        check_out_time: now,
+                        date: emp.today_attendance?.date || new Date().toISOString().split('T')[0],
+                        status: emp.today_attendance?.status || 'present',
+                        created_at: emp.today_attendance?.created_at || now,
+                        updated_at: now
+                    }
+                }
+            }))
+
             setResultDialogType('success')
             setResultDialogTitle('Check-out Successful!')
             setResultDialogDescription(result.message)
             setResultDialogOpen(true)
+            // Refresh server data to ensure final state is synced
             if (branchId) {
                 fetchEmployees(branchId)
             }
@@ -389,6 +445,25 @@ export default function BranchEmployeePage() {
     const handleMarkAbsent = async (employeeId: string) => {
         const result = await markEmployeeAbsent(employeeId)
         if (result.success) {
+            // Optimistic UI update: immediately reflect "absent" status in the table
+            const now = new Date().toISOString()
+            setEmployees(prev => prev.map(emp => {
+                if (emp.id !== employeeId) return emp
+                return {
+                    ...emp,
+                    today_attendance: {
+                        id: emp.today_attendance?.id || 'temp-' + employeeId,
+                        employee_id: employeeId,
+                        check_in_time: null,
+                        check_out_time: null,
+                        date: new Date().toISOString().split('T')[0],
+                        status: 'absent',
+                        created_at: emp.today_attendance?.created_at || now,
+                        updated_at: now
+                    }
+                }
+            }))
+
             setResultDialogType('success')
             setResultDialogTitle('Marked as Absent')
             setResultDialogDescription(result.message)
@@ -407,10 +482,31 @@ export default function BranchEmployeePage() {
     const handleMarkOnLeave = async (employeeId: string) => {
         const result = await markEmployeeOnLeave(employeeId)
         if (result.success) {
+            // Optimistic UI update: immediately reflect "leave" status in the table
+            const now = new Date().toISOString()
+            setEmployees(prev => prev.map(emp => {
+                if (emp.id !== employeeId) return emp
+                return {
+                    ...emp,
+                    today_attendance: {
+                        id: emp.today_attendance?.id || 'temp-' + employeeId,
+                        employee_id: employeeId,
+                        check_in_time: null,
+                        check_out_time: null,
+                        date: new Date().toISOString().split('T')[0],
+                        status: 'leave',
+                        created_at: emp.today_attendance?.created_at || now,
+                        updated_at: now
+                    }
+                }
+            }))
+
             setResultDialogType('success')
             setResultDialogTitle('Marked as On Leave')
             setResultDialogDescription(result.message)
             setResultDialogOpen(true)
+
+            // Also refresh server data to ensure final state is synced
             if (branchId) {
                 fetchEmployees(branchId)
             }
@@ -501,7 +597,7 @@ export default function BranchEmployeePage() {
             </div>
 
             {/* Stats Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {employeeStats.map((stat, index) => (
                     <motion.div
                         key={stat.name}
@@ -510,17 +606,17 @@ export default function BranchEmployeePage() {
                         transition={{ delay: index * 0.1 }}
                     >
                         <Card className="glass border-green-100 card-hover">
-                            <CardContent className="p-4">
-                                <div className="flex items-start justify-between mb-4">
-                                    <div className={`w-12 h-12 ${stat.bg} ${stat.color} rounded-xl flex items-center justify-center`}>
-                                        <stat.icon className="w-6 h-6" />
+                            <CardContent className="p-3">
+                                <div className="flex items-start justify-between mb-3">
+                                    <div className={`w-10 h-10 ${stat.bg} ${stat.color} rounded-lg flex items-center justify-center`}>
+                                        <stat.icon className="w-5 h-5" />
                                     </div>
                                     <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full">
                                         {stat.percentage}
                                     </span>
                                 </div>
                                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">{stat.name}</p>
-                                <h3 className="text-2xl font-bold text-foreground">{stat.value}</h3>
+                                <h3 className="text-xl font-bold text-foreground">{stat.value}</h3>
                             </CardContent>
                         </Card>
                 </motion.div>

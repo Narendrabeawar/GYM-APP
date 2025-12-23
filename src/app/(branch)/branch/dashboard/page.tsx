@@ -39,15 +39,34 @@ export default function BranchDashboardPage() {
                     setBranchId(user.user_metadata.branch_id)
 
                     // Fetch dashboard data from server API
-                    const res = await fetch('/api/branch/dashboard')
-                    if (!res.ok) {
-                        const errText = await res.text()
-                        console.error('API error:', errText)
-                        setError('Failed to load dashboard data')
-                    } else {
-                        const data = await res.json()
-                        setDashboardData(data)
-                    }
+                     try {
+                         const res = await fetch('/api/branch/dashboard', {
+                             method: 'GET',
+                             headers: {
+                                 'Content-Type': 'application/json',
+                             },
+                             credentials: 'include'
+                         })
+                         
+                         if (!res.ok) {
+                             const errData = await res.json().catch(() => null)
+                             console.error('API error:', { status: res.status, data: errData })
+                             
+                             if (res.status === 401) {
+                                 setError('Your session expired. Please login again.')
+                             } else if (res.status === 400) {
+                                 setError('Branch information not found in your account.')
+                             } else {
+                                 setError(errData?.error || 'Failed to load dashboard data')
+                             }
+                         } else {
+                             const data = await res.json()
+                             setDashboardData(data)
+                         }
+                     } catch (fetchErr) {
+                         console.error('Fetch error:', fetchErr)
+                         setError('Failed to connect to server')
+                     }
                 } else {
                     setError('No branch ID found')
                 }

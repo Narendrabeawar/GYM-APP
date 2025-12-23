@@ -191,7 +191,7 @@ CREATE TABLE IF NOT EXISTS public.attendance (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     gym_id UUID REFERENCES public.gyms(id) ON DELETE CASCADE,
     member_id UUID REFERENCES public.members(id) ON DELETE CASCADE,
-    check_in_time TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    check_in_time TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()),
     check_out_time TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
@@ -286,6 +286,20 @@ CREATE TABLE IF NOT EXISTS public.employee_attendance (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
+-- Ensure existing database has an up-to-date CHECK constraint that allows 'leave'.
+-- This will drop the old constraint (if present) and recreate it including 'leave'.
+-- Run this during migrations or when applying setup.sql to an existing database.
+ALTER TABLE public.employee_attendance
+  DROP CONSTRAINT IF EXISTS employee_attendance_status_check;
+
+ALTER TABLE public.employee_attendance
+  ADD CONSTRAINT employee_attendance_status_check
+  CHECK (status = ANY (ARRAY['present'::text, 'absent'::text, 'late'::text, 'leave'::text]));
+
+-- For existing databases: make check_in_time nullable so we can set it to NULL
+-- when marking an employee absent or on leave.
+ALTER TABLE IF EXISTS public.employee_attendance
+  ALTER COLUMN check_in_time DROP NOT NULL;
 
 -- ==========================================
 -- 🔐 ROW LEVEL SECURITY (RLS)

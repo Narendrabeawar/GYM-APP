@@ -11,12 +11,14 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
+import WelcomePopup from '@/components/WelcomePopup'
 
 export default function SignInPage() {
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
     const [showPassword, setShowPassword] = useState(false)
     const [isLoading, setIsLoading] = useState(false)
+    const [showWelcome, setShowWelcome] = useState(false)
     const router = useRouter()
     const supabase = createClient()
 
@@ -40,23 +42,26 @@ export default function SignInPage() {
             if (data?.user) {
                 const { role, force_password_change } = data.user.user_metadata
 
-                toast.success('Welcome back!', {
-                    description: 'Redirecting to your dashboard...',
-                })
+                // Show welcome popup instead of toast
+                setShowWelcome(true)
+                sessionStorage.setItem('welcomed', 'true')
 
-                if (force_password_change) {
-                    router.push('/change-password')
-                } else if (role === 'admin') {
-                    router.push('/dashboard')
-                } else if (role === 'gym_admin') {
-                    router.push('/gym/dashboard')
-                } else if (role === 'branch_admin') {
-                    router.push('/branch/dashboard')
-                } else {
-                    router.push('/dashboard')
-                }
+                // Redirect after popup closes (2 seconds)
+                setTimeout(() => {
+                    if (force_password_change) {
+                        router.push('/change-password')
+                    } else if (role === 'admin') {
+                        router.push('/dashboard')
+                    } else if (role === 'gym_admin') {
+                        router.push('/gym/dashboard')
+                    } else if (role === 'branch_admin') {
+                        router.push('/branch/dashboard')
+                    } else {
+                        router.push('/dashboard')
+                    }
 
-                router.refresh()
+                    router.refresh()
+                }, 2100) // 2 seconds for popup + 100ms buffer
             }
         } catch {
             toast.error('Something went wrong', {
@@ -68,13 +73,16 @@ export default function SignInPage() {
     }
 
     return (
-        <div className="min-h-screen w-full bg-white flex items-center justify-center p-4">
+        <>
+            <WelcomePopup isOpen={showWelcome} />
+            <div className="min-h-screen w-full bg-white flex items-center justify-center p-4">
             {/* Main Floating Card Container */}
             <motion.div
                 initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.5 }}
+                animate={{ opacity: showWelcome ? 0 : 1, scale: showWelcome ? 0.9 : 1 }}
+                transition={{ duration: 0.4 }}
                 className="w-full max-w-[1200px] h-[800px] bg-white rounded-[32px] shadow-2xl overflow-hidden flex"
+                style={{ pointerEvents: showWelcome ? 'none' : 'auto' }}
             >
                 {/* Left Side - Form */}
                 <div className="w-full lg:w-[45%] h-full p-8 lg:p-16 flex flex-col justify-center relative">
@@ -188,6 +196,7 @@ export default function SignInPage() {
                     </div>
                 </div>
             </motion.div>
-        </div>
+            </div>
+        </>
     )
 }

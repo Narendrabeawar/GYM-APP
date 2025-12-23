@@ -7,13 +7,14 @@ export async function GET(request: Request) {
         const supabase = await createServerClient()
         const { data: { user }, error: userError } = await supabase.auth.getUser()
 
-        if (userError) {
+        if (userError || !user) {
             console.error('Error fetching user in API:', userError)
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
         const gymId = user?.user_metadata?.gym_id
         if (!gymId) {
+            console.error('No gym ID in user metadata:', { metadata: user.user_metadata })
             return NextResponse.json({ error: 'No gym id found' }, { status: 400 })
         }
 

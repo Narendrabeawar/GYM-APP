@@ -152,7 +152,9 @@ export async function markEmployeeAbsent(employeeId: string, date?: string): Pro
                 .insert({
                     employee_id: employeeId,
                     date: targetDate,
-                    status: 'absent'
+                    status: 'absent',
+                    check_in_time: null,
+                    check_out_time: null
                 })
             error = result.error
             console.log('Insert result:', result)
@@ -197,31 +199,45 @@ export async function markEmployeeOnLeave(employeeId: string, date?: string): Pr
         let error = null
         let result
 
+        // Validate status value before attempting DB write
+        const allowedStatuses = ['present', 'absent', 'late', 'leave']
+        const desiredStatus = 'leave'
+        if (!allowedStatuses.includes(desiredStatus)) {
+            console.error('Invalid status attempted for leave:', desiredStatus)
+            return { error: `Invalid attendance status: ${desiredStatus}` }
+        }
+
         if (existingAttendance) {
-            // Update existing record
+            // Update existing record - mark as leave
             console.log('Updating existing attendance record for leave:', existingAttendance.id)
+            const payload = {
+                status: desiredStatus,
+                check_in_time: null,
+                check_out_time: null,
+                updated_at: new Date().toISOString()
+            }
+            console.log('Update payload (leave -> null times):', payload)
             result = await supabase
                 .from('employee_attendance')
-                .update({
-                    status: 'leave',
-                    check_in_time: null,
-                    check_out_time: null,
-                    updated_at: new Date().toISOString()
-                })
+                .update(payload)
                 .eq('id', existingAttendance.id)
             error = result.error
             console.log('Update result:', result)
         } else {
-            // Create new leave record
+            // Create new leave record with null times
             console.log('Creating new leave record for employee:', employeeId, 'date:', targetDate)
+            const payload = {
+                employee_id: employeeId,
+                date: targetDate,
+                status: desiredStatus,
+                check_in_time: null,
+                check_out_time: null
+            }
+            console.log('Insert payload (leave -> null times):', payload)
             result = await supabase
                 .from('employee_attendance')
-                .insert({
-                    employee_id: employeeId,
-                    date: targetDate,
-                    status: 'leave'
-                })
-            error = result.error
+                .insert(payload)
+            error = result?.error
             console.log('Insert result:', result)
         }
 
@@ -273,6 +289,7 @@ export async function getTodayAttendanceStats(branchId: string): Promise<{
     presentToday: number
     absentToday: number
     checkedInNow: number
+    onLeaveToday: number
 }> {
     const supabase = createAdminClient()
     const today = new Date().toISOString().split('T')[0]
@@ -285,21 +302,34 @@ export async function getTodayAttendanceStats(branchId: string): Promise<{
             .eq('branch_id', branchId)
             .eq('status', 'active')
 
-        // Get today's attendance records
+        // Get all employees in branch
+        const { data: employees } = await supabase
+            .from('employees')
+            .select('id')
+            .eq('branch_id', branchId)
+            .eq('status', 'active')
+
+        const employeeIds = employees?.map(e => e.id) || []
+
+        // Get today's attendance records for this branch's employees
         const { data: attendanceRecords } = await supabase
             .from('employee_attendance')
-            .select('employee_id, check_out_time')
+            .select('employee_id, check_out_time, status')
             .eq('date', today)
+            .in('employee_id', employeeIds)
 
-        const presentToday = attendanceRecords?.length || 0
-        const checkedInNow = attendanceRecords?.filter(record => !record.check_out_time).length || 0
-        const absentToday = (totalEmployees || 0) - presentToday
+        // Count employees with different statuses
+        const presentToday = attendanceRecords?.filter(r => r.status === 'present').length || 0
+        const absentToday = attendanceRecords?.filter(r => r.status === 'absent').length || 0
+        const onLeaveToday = attendanceRecords?.filter(r => r.status === 'leave').length || 0
+        const checkedInNow = attendanceRecords?.filter(record => !record.check_out_time && record.status === 'present').length || 0
 
         return {
             totalEmployees: totalEmployees || 0,
             presentToday,
-            absentToday: Math.max(0, absentToday),
-            checkedInNow
+            absentToday,
+            checkedInNow,
+            onLeaveToday // Employees marked as 'leave' status in database
         }
     } catch (err: any) {
         console.error('Error fetching attendance stats:', err)
@@ -307,7 +337,8 @@ export async function getTodayAttendanceStats(branchId: string): Promise<{
             totalEmployees: 0,
             presentToday: 0,
             absentToday: 0,
-            checkedInNow: 0
+            checkedInNow: 0,
+            onLeaveToday: 0
         }
     }
 }

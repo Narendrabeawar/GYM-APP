@@ -7,13 +7,14 @@ export async function GET(request: Request) {
         const supabase = await createServerClient()
         const { data: { user }, error: userError } = await supabase.auth.getUser()
 
-        if (userError) {
+        if (userError || !user) {
             console.error('Error fetching user in API:', userError)
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
         const branchId = user?.user_metadata?.branch_id
         if (!branchId) {
+            console.error('No branch ID in user metadata:', { metadata: user.user_metadata })
             return NextResponse.json({ error: 'No branch id found' }, { status: 400 })
         }
 
