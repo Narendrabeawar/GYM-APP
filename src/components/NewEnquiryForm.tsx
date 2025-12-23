@@ -20,16 +20,20 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { User, Heart, Phone, FileText, Plus, Calendar, MapPin, Phone as PhoneIcon, CalendarDays, BadgeDollarSign, MoreHorizontal } from 'lucide-react'
+import { User, Heart, Phone, FileText, Plus, Calendar, MapPin, Phone as PhoneIcon, CalendarDays, BadgeDollarSign, MoreHorizontal, Edit } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { ConvertToMemberModal } from '@/components/ConvertToMemberModal'
+import { updateEnquiry } from '@/app/actions/enquiry'
+import ResultDialog from '@/components/ResultDialog'
 
 interface EnquiryFormData {
   full_name: string
   father_name: string
   phone: string
   email: string
+  date_of_birth: string
+  gender: string
   address: string
   health_info: string
   blood_group: string
@@ -48,6 +52,8 @@ interface Enquiry {
   father_name?: string
   phone: string
   email?: string
+  date_of_birth?: string
+  gender?: string
   address: string
   health_info?: string
   blood_group?: string
@@ -75,10 +81,16 @@ interface MembershipPlan {
   plan_period?: string
 }
 
-export default function NewEnquiryForm() {
+interface NewEnquiryFormProps {
+  editMode?: boolean
+  enquiryData?: Enquiry | null
+  onSuccess?: () => void
+}
+
+export default function NewEnquiryForm({ editMode: propEditMode = false, enquiryData = null, onSuccess }: NewEnquiryFormProps) {
   const supabase = createClient()
   const [isLoading, setIsLoading] = useState(false)
-  const [showForm, setShowForm] = useState(false)
+  const [showForm, setShowForm] = useState(propEditMode) // Show form immediately in edit mode
   const [enquiries, setEnquiries] = useState<Enquiry[]>([])
   const [membershipPlans, setMembershipPlans] = useState<MembershipPlan[]>([])
   const defaultPlans: MembershipPlan[] = [
@@ -93,6 +105,19 @@ export default function NewEnquiryForm() {
   const [amountReceived, setAmountReceived] = useState<string>('')
   const [differenceAction, setDifferenceAction] = useState<string>('')
   const [showViewModal, setShowViewModal] = useState(false)
+  const [isEditMode, setIsEditMode] = useState(propEditMode)
+  const [editingEnquiry, setEditingEnquiry] = useState<Enquiry | null>(enquiryData)
+  const [resultDialog, setResultDialog] = useState<{
+    open: boolean
+    type: 'success' | 'error'
+    title: string
+    description?: string
+  }>({
+    open: false,
+    type: 'success',
+    title: '',
+    description: ''
+  })
 
   const selectedPlanDetails = useMemo(() => {
     const plansSource = membershipPlans.length ? membershipPlans : defaultPlans
@@ -145,6 +170,12 @@ export default function NewEnquiryForm() {
   const handleViewClick = (enquiry: Enquiry) => {
     setSelectedEnquiry(enquiry)
     setShowViewModal(true)
+  }
+
+  const handleEditClick = (enquiry: Enquiry) => {
+    setEditingEnquiry(enquiry)
+    setIsEditMode(true)
+    setShowForm(true)
   }
 
   const handleMarkContacted = async (enquiry: Enquiry) => {
@@ -307,6 +338,13 @@ export default function NewEnquiryForm() {
                           >
                               View Details
                           </DropdownMenuItem>
+                          <DropdownMenuItem
+                              className="cursor-pointer flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-purple-50 text-purple-600 focus:text-purple-700 font-medium transition-colors"
+                              onClick={() => handleEditClick(enquiry)}
+                          >
+                              <Edit className="h-4 w-4" />
+                              Edit Enquiry
+                          </DropdownMenuItem>
                           <DropdownMenuSeparator className="bg-green-100 mx-1 my-1" />
                           <DropdownMenuItem
                               className="cursor-pointer flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-blue-50 text-blue-600 focus:text-blue-700 font-medium transition-colors"
@@ -448,6 +486,8 @@ export default function NewEnquiryForm() {
     father_name: '',
     phone: '',
     email: '',
+    date_of_birth: '',
+    gender: '',
     address: '',
     health_info: '',
     blood_group: '',
@@ -460,6 +500,31 @@ export default function NewEnquiryForm() {
     notes: ''
   })
 
+
+  // Effect to pre-fill form data when in edit mode
+  useEffect(() => {
+    if (isEditMode && editingEnquiry) {
+      setFormData({
+        full_name: editingEnquiry.full_name || '',
+        father_name: editingEnquiry.father_name || '',
+        phone: editingEnquiry.phone || '',
+        email: editingEnquiry.email || '',
+        date_of_birth: editingEnquiry.date_of_birth || '',
+        gender: editingEnquiry.gender || '',
+        address: editingEnquiry.address || '',
+        health_info: editingEnquiry.health_info || '',
+        blood_group: editingEnquiry.blood_group || '',
+        height: editingEnquiry.height?.toString() || '',
+        weight: editingEnquiry.weight?.toString() || '',
+        fitness_goal: editingEnquiry.fitness_goal || '',
+        emergency_contact_name: editingEnquiry.emergency_contact_name || '',
+        emergency_contact_phone: editingEnquiry.emergency_contact_phone || '',
+        emergency_contact_relationship: editingEnquiry.emergency_contact_relationship || '',
+        notes: editingEnquiry.notes || ''
+      })
+    }
+  }, [isEditMode, editingEnquiry])
+
   const handleInputChange = (field: keyof EnquiryFormData, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }))
   }
@@ -469,81 +534,128 @@ export default function NewEnquiryForm() {
     setIsLoading(true)
 
     try {
-      // Get current user profile to determine gym_id and branch_id
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        toast.error('User not authenticated')
-        return
-      }
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('gym_id, branch_id')
-        .eq('id', user.id)
-        .single()
-
-      if (!profile?.gym_id) {
-        toast.error('No gym associated with your account')
-        return
-      }
-
-      // Create the enquiry
-      const { error } = await supabase
-        .from('enquiries')
-        .insert({
-          full_name: formData.full_name,
-          father_name: formData.father_name || null,
-          phone: formData.phone,
-          email: formData.email || null,
-          address: formData.address,
-          health_info: formData.health_info || null,
-          blood_group: formData.blood_group || null,
-          height: formData.height ? parseFloat(formData.height) : null,
-          weight: formData.weight ? parseFloat(formData.weight) : null,
-          fitness_goal: formData.fitness_goal || null,
-          emergency_contact_name: formData.emergency_contact_name || null,
-          emergency_contact_phone: formData.emergency_contact_phone || null,
-          emergency_contact_relationship: formData.emergency_contact_relationship || null,
-          notes: formData.notes || null,
-          gym_id: profile.gym_id,
-          branch_id: profile.branch_id || null,
-          created_by: user.id
+      if (isEditMode && editingEnquiry) {
+        // Update existing enquiry
+        const formDataObj = new FormData()
+        Object.entries(formData).forEach(([key, value]) => {
+          formDataObj.append(key, value)
         })
-        .select()
-        .single()
 
-      if (error) {
-        console.error('Error creating enquiry:', error)
-        // Check if it's a table not found error
-        if (error.code === '42P01' || error.message?.includes('relation "enquiries" does not exist')) {
-          throw new Error('Enquiries feature is not yet set up. Please contact administrator.')
+        const result = await updateEnquiry(editingEnquiry!.id, formDataObj)
+
+        if (result.error) {
+          throw new Error(result.error)
         }
-        throw error
+
+        setResultDialog({
+          open: true,
+          type: 'success',
+          title: 'Enquiry Updated Successfully!',
+          description: 'Enquiry information has been updated.'
+        })
+        setShowForm(false)
+        setIsEditMode(false)
+        setEditingEnquiry(null)
+        setFormData({
+          full_name: '',
+          father_name: '',
+          phone: '',
+          email: '',
+          date_of_birth: '',
+          gender: '',
+          address: '',
+          health_info: '',
+          blood_group: '',
+          height: '',
+          weight: '',
+          fitness_goal: '',
+          emergency_contact_name: '',
+          emergency_contact_phone: '',
+          emergency_contact_relationship: '',
+          notes: ''
+        })
+        fetchEnquiries()
+        if (onSuccess) onSuccess()
+      } else {
+        // Get current user profile to determine gym_id and branch_id
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) {
+          toast.error('User not authenticated')
+          return
+        }
+
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('gym_id, branch_id')
+          .eq('id', user.id)
+          .single()
+
+        if (!profile?.gym_id) {
+          toast.error('No gym associated with your account')
+          return
+        }
+
+        // Create new enquiry
+        const { error } = await supabase
+          .from('enquiries')
+          .insert({
+            full_name: formData.full_name,
+            father_name: formData.father_name || null,
+            phone: formData.phone,
+            email: formData.email || null,
+            date_of_birth: formData.date_of_birth || null,
+            gender: formData.gender || null,
+            address: formData.address,
+            health_info: formData.health_info || null,
+            blood_group: formData.blood_group || null,
+            height: formData.height ? parseFloat(formData.height) : null,
+            weight: formData.weight ? parseFloat(formData.weight) : null,
+            fitness_goal: formData.fitness_goal || null,
+            emergency_contact_name: formData.emergency_contact_name || null,
+            emergency_contact_phone: formData.emergency_contact_phone || null,
+            emergency_contact_relationship: formData.emergency_contact_relationship || null,
+            notes: formData.notes || null,
+            gym_id: profile.gym_id,
+            branch_id: profile.branch_id || null,
+            created_by: user.id
+          })
+          .select()
+          .single()
+
+        if (error) {
+          console.error('Error creating enquiry:', error)
+          // Check if it's a table not found error
+          if (error.code === '42P01' || error.message?.includes('relation "enquiries" does not exist')) {
+            throw new Error('Enquiries feature is not yet set up. Please contact administrator.')
+          }
+          throw error
+        }
+
+        toast.success('Enquiry submitted successfully!')
+        setShowForm(false)
+        setFormData({
+          full_name: '',
+          father_name: '',
+          phone: '',
+          email: '',
+          date_of_birth: '',
+          gender: '',
+          address: '',
+          health_info: '',
+          blood_group: '',
+          height: '',
+          weight: '',
+          fitness_goal: '',
+          emergency_contact_name: '',
+          emergency_contact_phone: '',
+          emergency_contact_relationship: '',
+          notes: ''
+        })
+        fetchEnquiries()
       }
-
-      toast.success('Enquiry submitted successfully!')
-      setShowForm(false)
-      setFormData({
-        full_name: '',
-        father_name: '',
-        phone: '',
-        email: '',
-        address: '',
-        health_info: '',
-        blood_group: '',
-        height: '',
-        weight: '',
-        fitness_goal: '',
-        emergency_contact_name: '',
-        emergency_contact_phone: '',
-        emergency_contact_relationship: '',
-        notes: ''
-      })
-      fetchEnquiries()
-
     } catch (error) {
-      console.error('Error creating enquiry:', error)
-      toast.error(error instanceof Error ? error.message : 'Failed to create enquiry')
+      console.error('Error saving enquiry:', error)
+      toast.error(error instanceof Error ? error.message : 'Failed to save enquiry')
     } finally {
       setIsLoading(false)
     }
@@ -609,7 +721,7 @@ export default function NewEnquiryForm() {
       const difference = Number((receivedAmount - finalPayableAmount).toFixed(2))
 
       // Track how we store details
-      let payableAmount = finalPayableAmount
+      const payableAmount = finalPayableAmount
       let discountApplied = 0
       let dueAmount = 0
       let extraAmount = 0
@@ -716,8 +828,8 @@ export default function NewEnquiryForm() {
               phone: selectedEnquiry.phone,
               address: selectedEnquiry.address,
               blood_group: selectedEnquiry.blood_group || null,
-              height: selectedEnquiry.height ? parseFloat(selectedEnquiry.height as any) : null,
-              weight: selectedEnquiry.weight ? parseFloat(selectedEnquiry.weight as any) : null,
+              height: selectedEnquiry.height || null,
+              weight: selectedEnquiry.weight || null,
               fitness_goal: selectedEnquiry.fitness_goal || null,
               medical_conditions: selectedEnquiry.health_info || null,
               emergency_contact: selectedEnquiry.emergency_contact_name || null,
@@ -890,11 +1002,17 @@ export default function NewEnquiryForm() {
           <p className="text-stone-600">View and manage all enquiry records</p>
         </div>
         <Button
-          onClick={() => setShowForm(!showForm)}
+          onClick={() => {
+            if (isEditMode) {
+              setIsEditMode(false)
+              setEditingEnquiry(null)
+            }
+            setShowForm(!showForm)
+          }}
           className="bg-gradient-to-r from-emerald-800 to-teal-800 hover:from-emerald-900 hover:to-teal-900 text-white shadow-lg"
         >
           <Plus className="w-4 h-4 mr-2" />
-          {showForm ? 'Hide Form' : 'Add New Enquiry'}
+          {isEditMode ? 'Cancel Edit' : showForm ? 'Hide Form' : 'Add New Enquiry'}
         </Button>
       </div>
 
@@ -1001,6 +1119,35 @@ export default function NewEnquiryForm() {
                     onChange={(e) => handleInputChange('email', e.target.value)}
                     className="border-stone-200 focus:border-emerald-500 focus:ring-emerald-500"
                   />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="date_of_birth" className="text-sm font-medium">
+                    Date of Birth
+                  </Label>
+                  <Input
+                    id="date_of_birth"
+                    type="date"
+                    value={formData.date_of_birth}
+                    onChange={(e) => handleInputChange('date_of_birth', e.target.value)}
+                    className="border-stone-200 focus:border-emerald-500 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="gender" className="text-sm font-medium">
+                    Gender
+                  </Label>
+                  <Select value={formData.gender} onValueChange={(value) => handleInputChange('gender', value)}>
+                    <SelectTrigger className="border-stone-200 focus:border-emerald-500 focus:ring-emerald-500">
+                      <SelectValue placeholder="Select gender" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white/95 backdrop-blur-xl border-2 border-gray-200">
+                      <SelectItem value="male" className="hover:bg-emerald-50 focus:bg-emerald-50 cursor-pointer">Male</SelectItem>
+                      <SelectItem value="female" className="hover:bg-emerald-50 focus:bg-emerald-50 cursor-pointer">Female</SelectItem>
+                      <SelectItem value="other" className="hover:bg-emerald-50 focus:bg-emerald-50 cursor-pointer">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
 
@@ -1185,7 +1332,7 @@ export default function NewEnquiryForm() {
                 disabled={isLoading}
                 className="bg-gradient-to-r from-emerald-800 to-teal-800 hover:from-emerald-900 hover:to-teal-900 text-white shadow-lg"
               >
-                {isLoading ? 'Submitting...' : 'Submit Enquiry'}
+                {isLoading ? (isEditMode ? 'Updating...' : 'Submitting...') : (isEditMode ? 'Update Enquiry' : 'Submit Enquiry')}
               </Button>
             </div>
           </motion.form>
@@ -1315,6 +1462,17 @@ export default function NewEnquiryForm() {
         </div>
       </DialogContent>
     </Dialog>
+
+    {/* Result Dialog for Edit Success */}
+    <ResultDialog
+      open={resultDialog.open}
+      onOpenChange={(open) => setResultDialog(prev => ({ ...prev, open }))}
+      type={resultDialog.type}
+      title={resultDialog.title}
+      description={resultDialog.description}
+      actionText="Continue"
+      autoClose={resultDialog.type === 'success'}
+    />
     </motion.div>
   )
 }

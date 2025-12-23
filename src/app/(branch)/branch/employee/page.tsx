@@ -1,20 +1,16 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import {
     Users,
     CheckCircle2,
     XCircle,
-    Clock,
-    Search,
-    Download,
-    Filter,
     UserCheck,
     UserPlus,
     Loader2,
     Calendar,
-    User,
     Phone,
     Mail,
     MapPin,
@@ -22,6 +18,7 @@ import {
     MoreHorizontal,
     Edit,
     Trash2,
+    BarChart3,
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -66,7 +63,6 @@ export default function BranchEmployeePage() {
         { name: 'Absent Today', value: '0', icon: XCircle, color: 'text-red-600', bg: 'bg-red-50', percentage: '0%' },
         { name: 'Avg Attendance', value: '0%', icon: UserCheck, color: 'text-emerald-600', bg: 'bg-emerald-50', percentage: '0%' },
     ])
-    const [searchQuery, setSearchQuery] = useState('')
     const [employees, setEmployees] = useState<Employee[]>([])
     const [isLoading, setIsLoading] = useState(true)
     const [createDialogOpen, setCreateDialogOpen] = useState(false)
@@ -85,6 +81,10 @@ export default function BranchEmployeePage() {
         title: '',
         description: ''
     })
+
+    const router = useRouter()
+
+
 
     // Table columns definition
     const columns = useMemo<ColumnDef<Employee>[]>(() => [
@@ -156,7 +156,7 @@ export default function BranchEmployeePage() {
             id: 'status',
             header: 'Today\'s Status',
             cell: ({ row }) => {
-                const employee = row.original
+                const employee = row.original as Employee
                 return employee.today_attendance ? (
                     employee.today_attendance.status === 'absent' ? (
                         <Badge className="bg-orange-100 text-orange-700 hover:bg-orange-200 border-orange-200">
@@ -429,6 +429,7 @@ export default function BranchEmployeePage() {
         }
     }
 
+
     useEffect(() => {
         const getSession = async () => {
             const { data: { user } } = await supabase.auth.getUser()
@@ -456,6 +457,14 @@ export default function BranchEmployeePage() {
                     <p className="text-muted-foreground mt-2">Manage employees, track attendance, and monitor performance</p>
                 </div>
                 <div className="flex gap-2">
+                    <Button
+                        onClick={() => router.push('/branch/employee/attendance-report')}
+                        variant="outline"
+                        className="border-emerald-200 hover:bg-emerald-50 text-emerald-700 shadow-md hover:shadow-lg transition-all duration-200"
+                    >
+                        <BarChart3 className="w-4 h-4 mr-2" />
+                        Attendance Report
+                    </Button>
                     <Button
                         onClick={() => setCreateDialogOpen(true)}
                         className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-lg hover:shadow-xl transition-all duration-200"
@@ -489,9 +498,11 @@ export default function BranchEmployeePage() {
                                 <h3 className="text-2xl font-bold text-foreground">{stat.value}</h3>
                             </CardContent>
                         </Card>
-                    </motion.div>
-                ))}
+                </motion.div>
+            ))}
             </div>
+
+            {/* Employee Table */}
 
             {/* Employee Table */}
             <motion.div
@@ -500,7 +511,7 @@ export default function BranchEmployeePage() {
                 transition={{ delay: 0.4 }}
                 className="w-full"
             >
-                    {isLoading ? (
+                {isLoading ? (
                         <div className="flex flex-col items-center justify-center py-20 gap-4">
                             <Loader2 className="w-10 h-10 text-emerald-800 animate-spin" />
                             <p className="text-stone-500 font-medium animate-pulse">Loading Employees...</p>

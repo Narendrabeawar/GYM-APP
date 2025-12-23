@@ -200,6 +200,8 @@ CREATE TABLE IF NOT EXISTS public.enquiries (
     father_name TEXT,
     phone TEXT NOT NULL,
     email TEXT,
+    date_of_birth DATE,                                    -- Date of birth for enquiry personal info
+    gender TEXT CHECK (gender IN ('male', 'female', 'other')), -- Gender: male, female, or other
     address TEXT NOT NULL,
     health_info TEXT,
     blood_group VARCHAR(10),
@@ -842,11 +844,20 @@ DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'transaction_categories' AND policyname = 'Gym staff can manage categories') THEN
         CREATE POLICY "Gym staff can manage categories" ON public.transaction_categories FOR ALL USING (
             EXISTS (
-                SELECT 1 FROM public.profiles 
-                WHERE id = auth.uid() 
+                SELECT 1 FROM public.profiles
+                WHERE id = auth.uid()
                 AND gym_id = public.transaction_categories.gym_id
                 AND role IN ('admin', 'gym_admin', 'branch_admin', 'receptionist')
             )
         );
     END IF;
 END $$;
+
+-- Migration: Add new columns to enquiries table for existing databases
+-- These ALTER TABLE statements will only add columns if they don't already exist
+ALTER TABLE enquiries ADD COLUMN IF NOT EXISTS date_of_birth DATE;
+ALTER TABLE enquiries ADD COLUMN IF NOT EXISTS gender TEXT CHECK (gender IN ('male', 'female', 'other'));
+
+-- Add comments to document the new columns
+COMMENT ON COLUMN enquiries.date_of_birth IS 'Date of birth for enquiry personal information';
+COMMENT ON COLUMN enquiries.gender IS 'Gender selection: male, female, or other';

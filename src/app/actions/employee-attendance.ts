@@ -369,3 +369,141 @@ export async function getEmployeesWithAttendance(branchId: string): Promise<Arra
         return []
     }
 }
+
+export async function getEmployeesAttendanceReport(branchId: string, startDate: string, endDate: string): Promise<{
+    employees: Array<{
+        id: string
+        full_name: string
+        attendance_summary: {
+            total_days: number
+            present_days: number
+            absent_days: number
+            leave_days: number
+            attendance_percentage: number
+        }
+        daily_attendance: Array<{
+            date: string
+            status: 'present' | 'absent' | 'leave'
+            check_in_time?: string
+            check_out_time?: string
+        }>
+    }>
+    summary: {
+        total_employees: number
+        total_working_days: number
+        average_attendance: number
+    }
+}> {
+    const supabase = createAdminClient()
+
+    try {
+        // Get all active employees for this branch
+        const { data: employees, error: employeesError } = await supabase
+            .from('employees')
+            .select('id, full_name')
+            .eq('branch_id', branchId)
+            .eq('status', 'active')
+            .order('full_name', { ascending: true })
+
+        if (employeesError) {
+            console.error('Error fetching employees:', employeesError)
+            return { employees: [], summary: { total_employees: 0, total_working_days: 0, average_attendance: 0 } }
+        }
+
+        // Calculate total working days in the range
+        const start = new Date(startDate)
+        const end = new Date(endDate)
+        const totalWorkingDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1
+
+        // Get attendance data for all employees in the date range
+        const { data: attendanceData, error: attendanceError } = await supabase
+            .from('employee_attendance')
+            .select('employee_id, date, status, check_in_time, check_out_time')
+            .in('employee_id', employees?.map(emp => emp.id) || [])
+            .gte('date', startDate)
+            .lte('date', endDate)
+            .order('date', { ascending: true })
+
+        if (attendanceError) {
+            console.error('Error fetching attendance data:', attendanceError)
+            return { employees: [], summary: { total_employees: 0, total_working_days: 0, average_attendance: 0 } }
+        }
+
+        // Process attendance data for each employee
+        const employeesReport = (employees || []).map(employee => {
+            // Get attendance records for this employee
+            const employeeAttendance = (attendanceData || []).filter(att => att.employee_id === employee.id)
+
+            // Create a map of date -> attendance record
+            const attendanceMap = new Map()
+            employeeAttendance.forEach(att => {
+                attendanceMap.set(att.date, att)
+            })
+
+            // Generate daily attendance for the entire date range
+            const dailyAttendance = []
+            let presentDays = 0
+            let absentDays = 0
+            let leaveDays = 0
+
+            for (let date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
+                const dateStr = date.toISOString().split('T')[0]
+                const attendance = attendanceMap.get(dateStr)
+
+                if (attendance) {
+                    dailyAttendance.push({
+                        date: dateStr,
+                        status: attendance.status,
+                        check_in_time: attendance.check_in_time,
+                        check_out_time: attendance.check_out_time
+                    })
+
+                    if (attendance.status === 'present') presentDays++
+                    else if (attendance.status === 'absent') absentDays++
+                    else if (attendance.status === 'leave') leaveDays++
+                } else {
+                    // No attendance record - treat as absent
+                    dailyAttendance.push({
+                        date: dateStr,
+                        status: 'absent'
+                    })
+                    absentDays++
+                }
+            }
+
+            const totalRecordedDays = presentDays + absentDays + leaveDays
+            const attendancePercentage = totalRecordedDays > 0 ? (presentDays / totalRecordedDays) * 100 : 0
+
+            return {
+                id: employee.id,
+                full_name: employee.full_name,
+                attendance_summary: {
+                    total_days: totalWorkingDays,
+                    present_days: presentDays,
+                    absent_days: absentDays,
+                    leave_days: leaveDays,
+                    attendance_percentage: Math.round(attendancePercentage * 100) / 100
+                },
+                daily_attendance: dailyAttendance
+            }
+        })
+
+        // Calculate overall summary
+        const totalEmployees = employees?.length || 0
+        const totalPresentDays = employeesReport.reduce((sum, emp) => sum + emp.attendance_summary.present_days, 0)
+        const totalRecordedDays = employeesReport.reduce((sum, emp) => sum + emp.attendance_summary.present_days + emp.attendance_summary.absent_days + emp.attendance_summary.leave_days, 0)
+        const averageAttendance = totalRecordedDays > 0 ? (totalPresentDays / totalRecordedDays) * 100 : 0
+
+        return {
+            employees: employeesReport,
+            summary: {
+                total_employees: totalEmployees,
+                total_working_days: totalWorkingDays,
+                average_attendance: Math.round(averageAttendance * 100) / 100
+            }
+        }
+    } catch (err: any) {
+        console.error('Error generating attendance report:', err)
+        return { employees: [], summary: { total_employees: 0, total_working_days: 0, average_attendance: 0 } }
+    }
+}

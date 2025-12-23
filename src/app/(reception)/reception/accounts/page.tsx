@@ -502,10 +502,6 @@ export default function AccountsPage() {
                 </div>
 
                 <div className="flex items-center gap-3">
-                    <Button variant="outline" className="rounded-xl border-emerald-200 hover:bg-emerald-50 text-emerald-800 font-bold border-2">
-                        <Download className="w-4 h-4 mr-2" />
-                        Export
-                    </Button>
                     <Link href="/reception/accounts/final-accounts" className="inline-block">
                         <Button variant="outline" className="rounded-xl border-emerald-200 hover:bg-emerald-50 text-emerald-800 font-bold border-2">
                             P&L (Final Accounts)

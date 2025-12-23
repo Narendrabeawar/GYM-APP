@@ -1116,6 +1116,29 @@ export default function BranchSettingsPage() {
                     <input type="hidden" name="holidayHours" value={additionalInfo.holidayHours} />
                     <input type="hidden" name="peakHours" value={additionalInfo.peakHours} />
 
+                    {/* Hidden inputs for operating hours */}
+                    <input type="hidden" name="mondayOpen" value={operatingHours.monday?.open || ''} />
+                    <input type="hidden" name="mondayClose" value={operatingHours.monday?.close || ''} />
+                    <input type="hidden" name="mondayClosed" value={operatingHours.monday?.closed ? 'true' : 'false'} />
+                    <input type="hidden" name="tuesdayOpen" value={operatingHours.tuesday?.open || ''} />
+                    <input type="hidden" name="tuesdayClose" value={operatingHours.tuesday?.close || ''} />
+                    <input type="hidden" name="tuesdayClosed" value={operatingHours.tuesday?.closed ? 'true' : 'false'} />
+                    <input type="hidden" name="wednesdayOpen" value={operatingHours.wednesday?.open || ''} />
+                    <input type="hidden" name="wednesdayClose" value={operatingHours.wednesday?.close || ''} />
+                    <input type="hidden" name="wednesdayClosed" value={operatingHours.wednesday?.closed ? 'true' : 'false'} />
+                    <input type="hidden" name="thursdayOpen" value={operatingHours.thursday?.open || ''} />
+                    <input type="hidden" name="thursdayClose" value={operatingHours.thursday?.close || ''} />
+                    <input type="hidden" name="thursdayClosed" value={operatingHours.thursday?.closed ? 'true' : 'false'} />
+                    <input type="hidden" name="fridayOpen" value={operatingHours.friday?.open || ''} />
+                    <input type="hidden" name="fridayClose" value={operatingHours.friday?.close || ''} />
+                    <input type="hidden" name="fridayClosed" value={operatingHours.friday?.closed ? 'true' : 'false'} />
+                    <input type="hidden" name="saturdayOpen" value={operatingHours.saturday?.open || ''} />
+                    <input type="hidden" name="saturdayClose" value={operatingHours.saturday?.close || ''} />
+                    <input type="hidden" name="saturdayClosed" value={operatingHours.saturday?.closed ? 'true' : 'false'} />
+                    <input type="hidden" name="sundayOpen" value={operatingHours.sunday?.open || ''} />
+                    <input type="hidden" name="sundayClose" value={operatingHours.sunday?.close || ''} />
+                    <input type="hidden" name="sundayClosed" value={operatingHours.sunday?.closed ? 'true' : 'false'} />
+
                     <div className="flex gap-4 mt-8 p-6 bg-linear-to-r from-gray-50 to-emerald-50 rounded-lg border border-emerald-100">
                         <Button
                             type="submit"

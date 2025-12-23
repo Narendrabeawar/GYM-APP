@@ -7,7 +7,8 @@ import {
     ArrowUpRight,
     Download,
     Plus,
-    Calendar
+    Calendar,
+    Printer
 } from 'lucide-react'
 import {
     Table,
@@ -104,6 +105,228 @@ export default function MemberLedger({
             month: '2-digit',
             year: 'numeric'
         })
+    }
+
+    const handleDownloadLedger = () => {
+        // Create CSV content
+        let csvContent = 'Member Ledger\n'
+        csvContent += `Member Name: ${memberName}\n`
+        csvContent += `Member ID: ${memberId.substring(0, 8)}\n`
+        csvContent += `Statement Date: ${formatDate(new Date().toISOString())}\n\n`
+
+        // Debit side
+        csvContent += 'DEBIT SIDE (Charges)\n'
+        csvContent += 'Sr.No,Date,Particulars,Amount\n'
+        ledgerEntries.debit.forEach((entry, idx) => {
+            csvContent += `${idx + 1},${formatDate(entry.date)},"${entry.particular}",${entry.amount}\n`
+        })
+        csvContent += `\nTotal Charges,${ledgerEntries.debit.reduce((sum, e) => sum + e.amount, 0)}\n\n`
+
+        // Credit side
+        csvContent += 'CREDIT SIDE (Payments)\n'
+        csvContent += 'Sr.No,Date,Particulars,Amount\n'
+        ledgerEntries.credit.forEach((entry, idx) => {
+            csvContent += `${idx + 1},${formatDate(entry.date)},"${entry.particular}",${entry.amount}\n`
+        })
+        csvContent += `\nTotal Payments,${ledgerEntries.credit.reduce((sum, e) => sum + e.amount, 0)}\n\n`
+
+        // Summary
+        csvContent += 'SUMMARY\n'
+        csvContent += `Net Balance,${Math.abs(currentMemberBalance)}\n`
+        csvContent += `Status,${currentMemberBalance > 0 ? 'Receivable' : currentMemberBalance < 0 ? 'Payable' : 'Settled'}\n`
+
+        // Create and download the file
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+        const link = document.createElement('a')
+        const url = URL.createObjectURL(blob)
+        link.setAttribute('href', url)
+        link.setAttribute('download', `${memberName.replace(/\s+/g, '_')}_ledger_${formatDate(new Date().toISOString())}.csv`)
+        link.style.visibility = 'hidden'
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+    }
+
+    const handlePrintLedger = () => {
+        // Create a print-friendly version
+        const printWindow = window.open('', '_blank')
+        if (!printWindow) return
+
+        const printContent = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>${memberName} - Member Ledger</title>
+                <style>
+                    body {
+                        font-family: 'Courier New', monospace;
+                        margin: 20px;
+                        color: #1f2937;
+                    }
+                    .header {
+                        text-align: center;
+                        border-bottom: 2px solid #10b981;
+                        padding-bottom: 20px;
+                        margin-bottom: 30px;
+                    }
+                    .header h1 {
+                        color: #065f46;
+                        font-size: 24px;
+                        margin: 0;
+                        text-transform: uppercase;
+                    }
+                    .header p {
+                        margin: 5px 0;
+                        font-size: 12px;
+                        color: #6b7280;
+                    }
+                    .ledger-section {
+                        margin-bottom: 30px;
+                    }
+                    .section-title {
+                        font-weight: bold;
+                        font-size: 14px;
+                        margin-bottom: 10px;
+                        text-transform: uppercase;
+                        border-bottom: 1px solid #d1d5db;
+                        padding-bottom: 5px;
+                    }
+                    table {
+                        width: 100%;
+                        border-collapse: collapse;
+                        margin-bottom: 20px;
+                    }
+                    th, td {
+                        border: 1px solid #d1d5db;
+                        padding: 8px;
+                        text-align: left;
+                        font-size: 12px;
+                    }
+                    th {
+                        background-color: #f3f4f6;
+                        font-weight: bold;
+                    }
+                    .amount {
+                        text-align: right;
+                    }
+                    .debit-amount {
+                        color: #dc2626;
+                    }
+                    .credit-amount {
+                        color: #059669;
+                    }
+                    .summary {
+                        border: 2px solid #10b981;
+                        padding: 20px;
+                        border-radius: 8px;
+                        background-color: #f0fdf4;
+                    }
+                    .summary-row {
+                        display: flex;
+                        justify-content: space-between;
+                        margin-bottom: 10px;
+                        font-size: 14px;
+                    }
+                    .summary-label {
+                        font-weight: bold;
+                    }
+                    .summary-value {
+                        font-weight: bold;
+                    }
+                    .net-balance {
+                        font-size: 18px;
+                        color: ${currentMemberBalance > 0 ? '#dc2626' : '#059669'};
+                    }
+                    @media print {
+                        body { margin: 0; }
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="header">
+                    <h1>${memberName}</h1>
+                    <p>Member ID: ${memberId.substring(0, 8)}</p>
+                    <p>Statement Date: ${formatDate(new Date().toISOString())}</p>
+                </div>
+
+                <div class="ledger-section">
+                    <div class="section-title">Debit Side (Charges)</div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="width: 50px;">Sr.No</th>
+                                <th style="width: 100px;">Date</th>
+                                <th>Particulars</th>
+                                <th style="width: 100px;" class="amount">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${ledgerEntries.debit.map((entry, idx) => `
+                                <tr>
+                                    <td>${idx + 1}</td>
+                                    <td>${formatDate(entry.date)}</td>
+                                    <td>${entry.particular}</td>
+                                    <td class="amount debit-amount">₹${entry.amount.toLocaleString('en-IN')}</td>
+                                </tr>
+                            `).join('')}
+                            ${ledgerEntries.debit.length === 0 ? '<tr><td colspan="4" style="text-align: center;">No debit records found</td></tr>' : ''}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="ledger-section">
+                    <div class="section-title">Credit Side (Payments)</div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="width: 50px;">Sr.No</th>
+                                <th style="width: 100px;">Date</th>
+                                <th>Particulars</th>
+                                <th style="width: 100px;" class="amount">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${ledgerEntries.credit.map((entry, idx) => `
+                                <tr>
+                                    <td>${idx + 1}</td>
+                                    <td>${formatDate(entry.date)}</td>
+                                    <td>${entry.particular}</td>
+                                    <td class="amount credit-amount">₹${entry.amount.toLocaleString('en-IN')}</td>
+                                </tr>
+                            `).join('')}
+                            ${ledgerEntries.credit.length === 0 ? '<tr><td colspan="4" style="text-align: center;">No credit records found</td></tr>' : ''}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="summary">
+                    <div class="summary-row">
+                        <span class="summary-label">Total Charges (DR):</span>
+                        <span class="summary-value debit-amount">₹${ledgerEntries.debit.reduce((sum, e) => sum + e.amount, 0).toLocaleString('en-IN')}</span>
+                    </div>
+                    <div class="summary-row">
+                        <span class="summary-label">Total Paid (CR):</span>
+                        <span class="summary-value credit-amount">₹${ledgerEntries.credit.reduce((sum, e) => sum + e.amount, 0).toLocaleString('en-IN')}</span>
+                    </div>
+                    <div class="summary-row" style="border-top: 1px solid #d1d5db; padding-top: 10px; margin-top: 10px;">
+                        <span class="summary-label net-balance">Net Balance:</span>
+                        <span class="summary-value net-balance">₹${Math.abs(currentMemberBalance).toLocaleString('en-IN')}</span>
+                    </div>
+                    ${currentMemberBalance !== 0 ? `<div style="text-align: center; font-size: 12px; color: #6b7280; margin-top: 10px;">(${currentMemberBalance > 0 ? 'Receivable' : 'Payable'})</div>` : ''}
+                </div>
+            </body>
+            </html>
+        `
+
+        printWindow.document.write(printContent)
+        printWindow.document.close()
+        printWindow.focus()
+
+        // Wait for content to load then print
+        setTimeout(() => {
+            printWindow.print()
+            printWindow.close()
+        }, 500)
     }
 
     return (
@@ -219,13 +442,21 @@ export default function MemberLedger({
                         }}
                     />
 
-                    <Button variant="outline" className="h-11 border-2 border-stone-100 font-bold uppercase tracking-wider text-xs px-6 hover:bg-stone-50 transition-all rounded-xl">
+                    <Button
+                        onClick={handleDownloadLedger}
+                        variant="outline"
+                        className="h-11 border-2 border-stone-100 font-bold uppercase tracking-wider text-xs px-6 hover:bg-stone-50 transition-all rounded-xl"
+                    >
                         <Download className="w-4 h-4 mr-2 text-stone-400" />
-                        Download
+                        Download Ledger
                     </Button>
-                    <Button variant="outline" className="h-11 border-2 border-stone-100 font-bold uppercase tracking-wider text-xs px-6 hover:bg-stone-50 transition-all rounded-xl">
-                        <Plus className="w-4 h-4 mr-2 text-stone-400" />
-                        Print
+                    <Button
+                        onClick={handlePrintLedger}
+                        variant="outline"
+                        className="h-11 border-2 border-stone-100 font-bold uppercase tracking-wider text-xs px-6 hover:bg-stone-50 transition-all rounded-xl"
+                    >
+                        <Printer className="w-4 h-4 mr-2 text-stone-400" />
+                        Print Ledger
                     </Button>
                 </div>
 
