@@ -58,7 +58,7 @@ export default function SignInPage() {
 
                 router.refresh()
             }
-        } catch (error) {
+        } catch {
             toast.error('Something went wrong', {
                 description: 'Please try again later.',
             })
@@ -103,20 +103,12 @@ export default function SignInPage() {
                                     value={email}
                                     onChange={(e) => setEmail(e.target.value)}
                                     required
-                                    className="h-12 rounded-xl !bg-white border-2 border-emerald-600 text-stone-900 placeholder:text-stone-400 focus:border-emerald-800 focus:ring-emerald-800 focus-visible:ring-emerald-800 focus-visible:border-emerald-800 transition-all pr-12 font-medium"
+                                    className="h-12 rounded-xl bg-white! border-2 border-emerald-600 text-stone-900 placeholder:text-stone-400 focus:border-emerald-800 focus:ring-emerald-800 focus-visible:ring-emerald-800 focus-visible:border-emerald-800 transition-all pr-12 font-medium"
                                 />
                             </div>
 
                             <div className="space-y-2">
-                                <div className="flex items-center justify-between">
-                                    <Label htmlFor="password" className="text-stone-700 font-medium">Password</Label>
-                                    <Link
-                                        href="/forgot-password"
-                                        className="text-sm font-semibold text-emerald-800 hover:text-emerald-900 transition-colors"
-                                    >
-                                        Forgot?
-                                    </Link>
-                                </div>
+                                <Label htmlFor="password" className="text-stone-700 font-medium">Password</Label>
                                 <div className="relative">
                                     <Input
                                         id="password"
@@ -125,7 +117,7 @@ export default function SignInPage() {
                                         value={password}
                                         onChange={(e) => setPassword(e.target.value)}
                                         required
-                                        className="h-12 rounded-xl !bg-white border-2 border-emerald-600 text-stone-900 placeholder:text-stone-400 focus:border-emerald-800 focus:ring-emerald-800 focus-visible:ring-emerald-800 focus-visible:border-emerald-800 transition-all pr-12 font-medium"
+                                        className="h-12 rounded-xl bg-white! border-2 border-emerald-600 text-stone-900 placeholder:text-stone-400 focus:border-emerald-800 focus:ring-emerald-800 focus-visible:ring-emerald-800 focus-visible:border-emerald-800 transition-all pr-12 font-medium"
                                     />
                                     <button
                                         type="button"
@@ -134,6 +126,14 @@ export default function SignInPage() {
                                     >
                                         {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                                     </button>
+                                </div>
+                                <div className="flex justify-end">
+                                    <Link
+                                        href="/forgot-password"
+                                        className="text-sm font-semibold text-emerald-800 hover:text-emerald-900 transition-colors"
+                                    >
+                                        Forgot Password
+                                    </Link>
                                 </div>
                             </div>
 
@@ -173,7 +173,7 @@ export default function SignInPage() {
                             className="object-cover opacity-80 mix-blend-overlay"
                             priority
                         />
-                        <div className="absolute inset-0 bg-gradient-to-t from-emerald-950/90 via-emerald-900/40 to-transparent" />
+                        <div className="absolute inset-0 bg-linear-to-t from-emerald-950/90 via-emerald-900/40 to-transparent" />
 
                         {/* Text Overlay on Image */}
                         <div className="absolute bottom-12 left-12 right-12 text-white z-10">
