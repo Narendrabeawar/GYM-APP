@@ -463,7 +463,7 @@ export default function AttendanceReportPage() {
                                             emp.attendance_summary.leave_days,
                                             emp.attendance_summary.attendance_percentage + '%'
                                         ])
-                                    ].map(row => row.map(cell => cell.toString().replace(/"/g, '""')).map(cell => `"${cell}"`).join(',')).join('\n')
+                                    ].map(row => row.map((cell: string | number) => cell.toString().replace(/"/g, '""')).map((cell: string) => `"${cell}"`).join(',')).join('\n')
 
                                     const blob = new Blob([csvContent], { type: 'text/csv' })
                                     const url = window.URL.createObjectURL(blob)

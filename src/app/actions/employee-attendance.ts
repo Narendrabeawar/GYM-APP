@@ -453,7 +453,7 @@ export async function getEmployeesAttendanceReport(branchId: string, startDate: 
                 if (attendance) {
                     dailyAttendance.push({
                         date: dateStr,
-                        status: attendance.status,
+                        status: attendance.status as 'present' | 'absent' | 'leave',
                         check_in_time: attendance.check_in_time,
                         check_out_time: attendance.check_out_time
                     })
@@ -465,7 +465,9 @@ export async function getEmployeesAttendanceReport(branchId: string, startDate: 
                     // No attendance record - treat as absent
                     dailyAttendance.push({
                         date: dateStr,
-                        status: 'absent'
+                        status: 'absent' as const,
+                        check_in_time: undefined,
+                        check_out_time: undefined
                     })
                     absentDays++
                 }
