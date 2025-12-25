@@ -7,7 +7,6 @@ import {
     Users,
     CheckCircle2,
     XCircle,
-    UserCheck,
     UserPlus,
     Loader2,
     Calendar,
@@ -75,6 +74,37 @@ export default function BranchEmployeePage() {
     ])
     const [employees, setEmployees] = useState<Employee[]>([])
     const [isLoading, setIsLoading] = useState(true)
+    // Helper: optimistic update top stat cards when an employee's status changes locally
+    const updateTopStatsOptimistic = (employeeId: string, newStatus: 'present' | 'absent' | 'leave') => {
+        const prevStatus = employees.find(e => e.id === employeeId)?.today_attendance?.status as (string | undefined)
+        if (prevStatus === newStatus) return
+
+        setEmployeeStats(prev => {
+            const totalEmployees = Number(prev[1].value) || 0
+            let present = Number(prev[0].value) || 0
+            let absent = Number(prev[2].value) || 0
+            let onLeave = Number(prev[3].value) || 0
+
+            // decrement previous
+            if (prevStatus === 'present') present = Math.max(0, present - 1)
+            if (prevStatus === 'absent') absent = Math.max(0, absent - 1)
+            if (prevStatus === 'leave') onLeave = Math.max(0, onLeave - 1)
+
+            // increment new
+            if (newStatus === 'present') present++
+            if (newStatus === 'absent') absent++
+            if (newStatus === 'leave') onLeave++
+
+            const pct = (n: number) => totalEmployees > 0 ? `${Math.round((n / totalEmployees) * 100)}%` : '0%'
+
+            return [
+                { ...prev[0], value: String(present), percentage: pct(present) },
+                { ...prev[1], value: String(totalEmployees), percentage: prev[1].percentage },
+                { ...prev[2], value: String(absent), percentage: pct(absent) },
+                { ...prev[3], value: String(onLeave), percentage: pct(onLeave) }
+            ]
+        })
+    }
     const [createDialogOpen, setCreateDialogOpen] = useState(false)
     const [editDialogOpen, setEditDialogOpen] = useState(false)
     const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null)
@@ -93,7 +123,7 @@ export default function BranchEmployeePage() {
 
 
     // Table columns definition
-    /* eslint-disable react-hooks/preserve-manual-memoization */
+    /* eslint-disable react-hooks/exhaustive-deps */
     const columns = useMemo<ColumnDef<Employee>[]>(() => [
         {
             header: 'Sr.No.',
@@ -153,7 +183,7 @@ export default function BranchEmployeePage() {
             cell: ({ row }) => (
                 <div className="flex items-start gap-2 max-w-[280px]">
                     <MapPin className="w-4 h-4 text-green-600 shrink-0 mt-0.5" />
-                    <span className="text-stone-600 text-sm leading-snug break-words">
+                    <span className="text-stone-600 text-sm leading-snug wrap-break-word">
                         {row.getValue('address') || 'Not provided'}
                     </span>
                 </div>
@@ -366,7 +396,7 @@ export default function BranchEmployeePage() {
         setIsLoading(false)
     }, [loadStats])
 
-    const handleCheckIn = async (employeeId: string) => {
+    async function handleCheckIn(employeeId: string) {
         const result = await checkInEmployee(employeeId)
         if (result.success) {
             // Optimistic UI update: set employee as present with check_in_time now
@@ -388,6 +418,9 @@ export default function BranchEmployeePage() {
                 }
             }))
 
+            // Update top stat cards optimistically
+            updateTopStatsOptimistic(employeeId, 'present')
+
             setResultDialogType('success')
             setResultDialogTitle('Check-in Successful!')
             setResultDialogDescription(result.message)
@@ -404,7 +437,7 @@ export default function BranchEmployeePage() {
         }
     }
 
-    const handleCheckOut = async (employeeId: string) => {
+    async function handleCheckOut(employeeId: string) {
         const result = await checkOutEmployee(employeeId)
         if (result.success) {
             // Optimistic UI update: set check_out_time now while keeping existing check_in_time
@@ -426,6 +459,9 @@ export default function BranchEmployeePage() {
                 }
             }))
 
+            // No change to top counts for check-out (status remains 'present')
+            // but we still refresh server data below.
+
             setResultDialogType('success')
             setResultDialogTitle('Check-out Successful!')
             setResultDialogDescription(result.message)
@@ -442,7 +478,7 @@ export default function BranchEmployeePage() {
         }
     }
 
-    const handleMarkAbsent = async (employeeId: string) => {
+    async function handleMarkAbsent(employeeId: string) {
         const result = await markEmployeeAbsent(employeeId)
         if (result.success) {
             // Optimistic UI update: immediately reflect "absent" status in the table
@@ -464,6 +500,9 @@ export default function BranchEmployeePage() {
                 }
             }))
 
+            // Update top stat cards optimistically
+            updateTopStatsOptimistic(employeeId, 'absent')
+
             setResultDialogType('success')
             setResultDialogTitle('Marked as Absent')
             setResultDialogDescription(result.message)
@@ -479,7 +518,7 @@ export default function BranchEmployeePage() {
         }
     }
 
-    const handleMarkOnLeave = async (employeeId: string) => {
+    async function handleMarkOnLeave(employeeId: string) {
         const result = await markEmployeeOnLeave(employeeId)
         if (result.success) {
             // Optimistic UI update: immediately reflect "leave" status in the table
@@ -500,6 +539,9 @@ export default function BranchEmployeePage() {
                     }
                 }
             }))
+
+            // Update top stat cards optimistically
+            updateTopStatsOptimistic(employeeId, 'leave')
 
             setResultDialogType('success')
             setResultDialogTitle('Marked as On Leave')
@@ -564,7 +606,7 @@ export default function BranchEmployeePage() {
             }
         }
         getSession()
-    }, [])
+    }, [fetchEmployees, loadStats, supabase])
 
 
     return (
@@ -588,7 +630,7 @@ export default function BranchEmployeePage() {
                     </Button>
                     <Button
                         onClick={() => setCreateDialogOpen(true)}
-                        className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-lg hover:shadow-xl transition-all duration-200"
+                        className="bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-lg hover:shadow-xl transition-all duration-200"
                     >
                         <UserPlus className="w-4 h-4 mr-2" />
                         Add Employee
@@ -606,17 +648,24 @@ export default function BranchEmployeePage() {
                         transition={{ delay: index * 0.1 }}
                     >
                         <Card className="glass border-green-100 card-hover">
-                            <CardContent className="p-3">
-                                <div className="flex items-start justify-between mb-3">
-                                    <div className={`w-10 h-10 ${stat.bg} ${stat.color} rounded-lg flex items-center justify-center`}>
-                                        <stat.icon className="w-5 h-5" />
+                            {/* Reduced height by ~40% via h-20 (was larger). Adjust if needed */}
+                            <CardContent className="p-3 h-24 relative flex flex-col justify-start items-start">
+                                {/* top row: icon left, percentage badge right - slightly moved up */}
+                                <div className="flex justify-between items-center w-full -mt-1">
+                                    <div className="flex items-center gap-3 -mt-1">
+                                        <div className={`w-9 h-9 ${stat.bg} ${stat.color} rounded-lg flex items-center justify-center`}>
+                                            <stat.icon className="w-4 h-4" />
+                                        </div>
                                     </div>
-                                    <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full">
+                                    <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full -mt-1">
                                         {stat.percentage}
                                     </span>
                                 </div>
-                                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">{stat.name}</p>
-                                <h3 className="text-xl font-bold text-foreground">{stat.value}</h3>
+
+                                <div className="mt-1">
+                                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{stat.name}</p>
+                                    <h3 className="text-2xl font-bold text-foreground mt-1">{stat.value}</h3>
+                                </div>
                             </CardContent>
                         </Card>
                 </motion.div>
